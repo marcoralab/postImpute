@@ -161,6 +161,7 @@ dat.out[nrow(dat.out)-1, "CHR"] <- "Mean"
 dat.out %<>%
   mutate(n = prettyNum(n, big.mark=",", preserve.width="none")) %>%
   mutate(cut.rsq.high = prettyNum(cut.rsq.high, big.mark=",", preserve.width="none")) %>%
+  mutate(cut.typed = prettyNum(cut.typed, big.mark=",", preserve.width="none")) %>%
   mutate(included = prettyNum(included, big.mark=",", preserve.width="none"))
 
 
