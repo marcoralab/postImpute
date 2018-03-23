@@ -1,0 +1,312 @@
+---
+title: "Imputation Statistics"
+author: "Shea Andrews and Brian Fulton-Howard"
+output: html_document
+params:
+   #path: /Users/sheaandrews/Desktop/F1/
+   path: ./ADGC_ACT1-2/
+   chrom: "20:22"
+   cohort: Sample
+   maf: 0.01 #cutoff between common and rare
+   rsq: 0.3 #Rsq to use with common variants
+   rsq2: NA #Rsq to use with rare variants (set to !r NA to use rsq as hard cutoff)
+   sampsize: 100000 #number of SNPs of each type to sample for figures
+---
+```{r setup, include=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+##---- Requried Pacakges ----##
+
+library(tidyverse) ## data wrangling
+library(ggplot2)   ## plotting
+library(scales)    ## for using commas on ggplot scales
+library(feather)   ## for outputing data to .feather format
+library(kableExtra)## displaing tables nicly in html
+#library(knitr)     ## kniting document (and making tables)
+library(stringr)   ## replace substring for file output
+library(magrittr)
+
+cohort_file <- str_replace(params$cohort, " ", "_")
+
+no_rsq2 = is.na(params$rsq2) || params$rsq2 == "NA"
+
+if (!no_rsq2) {
+  rsqs <- c(params$rsq, params$rsq2)
+} else {
+  rsqs <- params$rsq
+}
+
+ishtml <- knitr::opts_knit$get("rmarkdown.pandoc.to") == "html"
+
+samp_pretty <- prettyNum(params$sampsize, big.mark=",", preserve.width="none")
+
+
+##  Read in chromsome info files (chr*.info.gz) from HRC imputation, filtering by the chromosome list.
+chr_parse <- function(chr_arg) {
+  chr_arg <- unlist(strsplit(chr_arg, ","))
+  chrom <- c()
+  for (i in chr_arg) {
+    ii <- unlist(strsplit(i, ":"))
+    chrom <- append(chrom, ii[1]:ii[length(ii)])
+  }
+  chrom
+}
+
+chrom <- chr_parse(params$chrom)
+
+myFiles <- list.files(path = params$path, pattern = "*.info.gz")
+files_use = c()
+chroms_missing = c()
+for (i in chrom){
+  ch = paste0("chr",i,".info.gz")
+  chrom_present = grepl(ch, myFiles)
+  if (any(chrom_present)) {
+    files_use[length(files_use) + 1] <- ch
+  } else {
+    chroms_missing[length(chroms_missing) + 1] <- i
+    warning(sprintf("Chromosome %i is missing from disk.", i))
+  }
+}
+myFiles <- files_use
+```
+
+```{r data, include=FALSE, warning=FALSE}
+##---- Data Wrangling ----##
+##  empty list for reading files into
+data.ls <- list()
+
+##  Loop through chromsome files to read them into R
+# replace '-' with NA
+# seperate chr:pos into sepeate columns
+# change pos and EmpRsq to numeric varibles
+# create new varible with MAF bins
+for(i in myFiles){
+    dat.raw <- read_tsv(paste0(params$path,i), col_types = 'cccnnnncnnncc', na = c("-"))
+    dat <- dat.raw %>%
+      separate(SNP, c('CHR', 'POS'), sep = ":") %>%
+      mutate(POS = as.integer(POS)) %>%
+      unite(SNP, c(CHR, POS, 'REF(0)', 'ALT(1)'), sep = ':', remove = F) %>%
+      mutate(maf.cat = cut(MAF, breaks=c(-Inf, 0.0005, 0.001, 0.005, 0.01, 0.02, 0.05, Inf),
+                           labels=c('< 0.05%', '0.05% to 0.1%', '0.1% to 0.5%', '0.5% to 1%', '1% to 2%', '2% to 5%', '≥ 5%'))) %>%
+      select(SNP, CHR, POS, MAF, Rsq, EmpRsq, Genotyped, maf.cat)
+    data.ls[[i]] <- dat
+    cat(paste0("Chr: ", i, "\n"))
+  }
+
+# bind data frame together and relevel CHR
+dat <- bind_rows(data.ls)
+dat$CHR <- factor(dat$CHR, levels = c(1:22), labels = c(1:22))
+
+## calculate number of typed/imputed SNPs
+imputed.snps <- length(dat[dat$Genotyped == 'Imputed',]$SNP)
+typed.snps <- length(dat[dat$Genotyped == 'Genotyped',]$SNP)
+
+##  Subsample either 50k imputed and genotyped SNPs OR if less then 50k SNPs avalibe, all SNPs
+sampsize = params$sampsize
+datImput.smallsamp <- dat %>%
+  filter(Genotyped == 'Imputed') %>%
+  group_by(CHR) %>%
+  sample_frac(min(1, sampsize/imputed.snps), replace = F) %>% ## Don't use number greater than 1 if sample size is greater than actual number of SNPs.
+  ungroup()
+datTyped.smallsamp <- dat %>%
+  filter(Genotyped == 'Genotyped') %>%
+  group_by(CHR) %>%
+  sample_frac(min(1, sampsize/typed.snps), replace = F) %>%
+  ungroup()
+dat.smallsamp <- datImput.smallsamp %>%
+   bind_rows(datTyped.smallsamp) %>%
+   arrange(CHR, POS)
+
+## save dataframe to disk
+write_feather(dat.smallsamp, "df.feather")
+```
+
+```{r data tabulation, echo=FALSE}
+##---- Data Tabulation ----##
+##  total number of imputed SNPs per chromosome
+dat.out <- dat %>% mutate(cut.rsq.high = Rsq >= params$rsq & MAF >= params$maf) %>%
+  mutate(cut.typed = Genotyped == "Genotyped")
+
+if ( no_rsq2 ) {
+  dat.out %<>%
+    mutate(cut.maf = MAF >= params$maf) %>%
+    mutate(included = (cut.rsq.high & cut.maf) | cut.typed)
+} else {
+  dat.out %<>%
+    mutate(cut.rsq.low = Rsq >= params$rsq2 & MAF < params$maf) %>%
+    mutate(included = cut.rsq.low | cut.rsq.high | cut.typed)
+}
+
+tested.n <- dat.out %>%
+  select(Rsq, MAF, CHR) %>%
+  filter_all(all_vars(!is.na(.))) %>%
+  group_by(CHR) %>%
+  group_size()
+
+dat.out %<>%
+  select(-EmpRsq, -maf.cat) %>%
+  filter_all(all_vars(!is.na(.))) %>%
+  select(CHR, matches("cut.rsq.low|cut.maf"), cut.rsq.high, cut.typed, included) %>%
+  group_by(CHR) %>%
+  summarise_all(funs(sum)) %>%
+  ungroup() %>%
+  add_column(n = tested.n, .after = 1) %>%
+  mutate(CHR = as.character(CHR))
+
+dat.out %<>%
+  bind_rows(summarise_all(select(dat.out, -CHR), funs(mean))) %>%
+  bind_rows(summarise_all(select(dat.out, -CHR), funs(sum)))
+dat.out[nrow(dat.out), "CHR"] <- "Total"
+dat.out[nrow(dat.out)-1, "CHR"] <- "Mean"
+
+dat.out %<>%
+  mutate(n = prettyNum(n, big.mark=",", preserve.width="none")) %>%
+  mutate(cut.rsq.high = prettyNum(cut.rsq.high, big.mark=",", preserve.width="none")) %>%
+  mutate(included = prettyNum(included, big.mark=",", preserve.width="none"))
+
+
+
+if ( no_rsq2 ) {
+  dat.out %<>%
+    rename(cut.rsq = cut.rsq.high) %>%
+    mutate(cut.maf = prettyNum(cut.maf, big.mark=",", preserve.width="none"))
+} else {
+  dat.out %<>%
+    mutate(cut.rsq.low = prettyNum(cut.rsq.low, big.mark=",", preserve.width="none"))
+}
+
+## save the table to disk
+write_csv(dat.out, paste0(params$path, 'SNPcount', cohort_file, '.csv'))
+```
+
+## Number of SNPs in datasets
+The following table displays the number of imputed SNPs present in the GWAS, per chromosome and in total, pre- and post- SNP filtering for Minor allele frequency and Quality Score.
+
+```{r kable, echo=FALSE}
+
+dat.out %>%
+  knitr::kable(format = 'html', align = 'lrrrr', caption = 'Number of imputed SNPs, pre and post filtering') %>%
+  kable_styling(full_width = F, position = "center")
+
+```
+## Overall distribution of imputation quality
+
+The following histogram is of imputation quality scores ($\hat{r}^2$) for all chromosomes and positions. The different colors represent different chromosomes.
+
+```{r quality_distribution, warning=FALSE, echo = FALSE, fig.width=7.5, fig.height=4.7, fig.align='center'}
+##  Plot histogram of info score distribution
+ggplot(data = dat, aes(x = Rsq, fill = CHR)) + geom_histogram(binwidth = 0.01) +
+  scale_x_continuous(expand = c(0,0)) + scale_y_continuous(labels = comma, expand=c(0,0)) +
+  geom_vline(xintercept = rsqs, colour = 'red', linetype = 2) + theme_bw() +
+  labs(title = paste0(params$cohort, ': Distribution of imputation quality scores'), x = bquote('Quality ('~R^2~')'))
+```
+
+## Imputation quality in MAF ranges.
+
+The following violin plots show the distribution of the imputation quality scores ($\hat{r}^2$) for all chromosomes and positions in several ranges of MAF from ultra-rare to common. This shows the minimum MAF you can use in your analyses and the general quality of the imputation, as well as any unusual distributions of quality.
+
+```{r quality_mafbins, warning=FALSE, echo = FALSE, fig.width=7.5, fig.height=4.7, fig.align='center'}
+##  Plot distribution of Rsq by MAF bins
+ggplot(dat, aes(x = maf.cat, y = Rsq, fill = maf.cat)) + theme_bw() +
+  geom_violin(alpha = 0.75, scale = 'width', draw_quantiles = 1) +
+  geom_boxplot(width = 0.1, fill = 'white', outlier.size = 0.1) +
+  scale_fill_brewer(palette = 'Set1') + theme(legend.position = 'none') +
+  labs(title = paste0(params$cohort, ': Distribution of Quality score by MAF '),
+  x = 'MAF',
+  y = bquote('Quality ('~R^2~')'))
+```
+
+```{r kable maf_bins, echo=FALSE}
+dat %>%
+  group_by(maf.cat) %>%
+  summarise(n(), mean(Rsq, na.rm = T), sd(Rsq, na.rm = T)) %>%
+  rename('MAF Category' = maf.cat, n = 'n()', 'mean rsq' = 'mean(Rsq, na.rm = T)', 'sd rsq' = 'sd(Rsq, na.rm = T)') %>%
+  mutate(n = prettyNum(n, big.mark=",", preserve.width="none")) %>%
+  mutate_if(is.numeric, funs(round(., 2))) %>%
+  knitr::kable(format = 'html', align = 'lrcc', caption = 'Number of imputed per MAF bin and mean rsq') %>%
+  kable_styling(full_width = F, position = "center")
+
+```
+
+## Position vs. Quality Score
+
+The following scatter-plots show imputation quality scores ($\hat{r}^2$), plotted against position on each chromosome for aproxmitaly `r samp_pretty` imputed and `r samp_pretty` genotyped SNPs across the genome. This can be used to find gaps in imputation (there should only be gaps for the centromeres) or local dips in imputation qualtity.
+
+```{r quality_pos, warning=FALSE, echo = FALSE, fig.width=7.5, fig.height=5.7, fig.align='center'}
+## Plot Infoscore by genomic position
+ ggplot(data = dat.smallsamp, aes(x = POS, y = Rsq)) + geom_point(size = 0.1, alpha = 0.5) +
+  geom_hline(yintercept = rsqs, colour = 'red', linetype = 1) +
+  scale_x_continuous(expand = c(0,0)) + scale_y_continuous(expand=c(0,0)) +
+  facet_wrap(~CHR, scales = "free") +
+  theme_classic() + theme(axis.text.x=element_blank(), axis.ticks.x=element_blank()) +
+  labs(title = paste0(params$cohort, ': Quality score by genomic position'),
+  x = 'Genomic Position',
+  y = bquote('Quality ('~R^2~')'))
+```
+
+## MAF vs. Quality Score
+
+The following scatter-plot shows imputation quality scores ($\hat{r}^2$) plotted against logarithmically scaled Minor Allele Frequency (MAF). Because The relationship should be roughly exponential, it should appear sigmoid on the transformed plot. The place where the curve transitions will vary based on the successfulness of imputation.
+
+The wave-like formations are due to imprecision in the MAF of the original data which is used to calculate $\hat{r}^2$. You can zoom to see that the peaks correspond to MAF bins in the typed data. The equation is as follows:
+
+$$\hat{r}^2=\frac{\frac{1}{2n}\times\sum_{i=0}^{2n}(D_i-\hat{p})^2}{\hat{p}(1-\hat{p})}$$
+
+where $\hat{p}$ is alternate allele frequency, $D_i$ is the imputed posterior probability of the alternate allele in the $i^{th}$ haplotype and $n$ is the number of microarray samples submitted to the imputation server.
+
+Imputed SNPs are black, and typed SNPs are red. Approximately `r samp_pretty` imputed and `r samp_pretty` genotyped SNPs have been subsampled for the plot.
+
+```{r quality_maf, warning=FALSE, echo = FALSE, fig.width=7.5, fig.height=4.7, fig.align='center'}
+##  Plot info score vs MAF
+
+plt <- dat.smallsamp %>%
+  filter(Genotyped == "Genotyped") %>%
+  rename(Quality = EmpRsq, Type = Genotyped) %>%
+  select(MAF, Quality, SNP, Type)
+plt <- dat.smallsamp %>%
+  filter(Genotyped == "Imputed") %>%
+  rename(Quality = Rsq, Type = Genotyped) %>%
+  select(MAF, Quality, SNP, Type) %>%
+  bind_rows(plt)
+
+ggplot() +
+  geom_point(data = plt, aes(x = MAF, y = Quality, color = Type), size = 0.1, alpha = 0.3) +
+  scale_x_log10(breaks = scales::trans_breaks("log10", function(x) 10^x),
+   labels = scales::trans_format("log10", scales::math_format(10^.x)), limits = c(0.00001, 0.5), expand=c(0,0)) +
+  scale_y_continuous(sec.axis = sec_axis(~ . +0, name = bquote('Concordance (Emperical '~R^2~')')), limits = c(0, 1), expand=c(0,0)) +
+  geom_vline(xintercept = params$maf, colour = 'blue', linetype = 2) +
+  geom_hline(yintercept = rsqs, colour = 'red', linetype = 2) +
+  theme_bw() + labs(title = paste0(params$cohort, ': Quality score by MAF'), y = bquote('Quality ('~R^2~')')) +
+  scale_colour_manual(name = 'SNPs', values = c('Imputed'='black','Genotyped'='red'), guide = 'legend') +
+  guides(colour = guide_legend(override.aes = list(size = 1))) + theme(legend.position = 'bottom') + annotation_logticks()
+```
+
+
+```{R conditional_block_py, echo=FALSE, results='asis', eval=ishtml}
+cat(sprintf("## MAF vs. Quality Score (interactive)
+
+Below is an interactive version of the same plot, with approximately %s Genotyped SNPs and %s Imputed SNPs subsampled. You can zoom in and out, and you can mouse over individual variants for more information.
+
+", samp_pretty, samp_pretty))
+```
+
+```{r ggploty, eval=ishtml, echo=FALSE, message=FALSE, warning=FALSE}
+library(plotly)
+fig <- plt %>% plot_ly(x = ~MAF, y = ~Quality, color = ~Type,
+  type="scatter", mode="markers", customdata = c(~SNP, ~Type),
+  marker = list(size = 3, opacity = 0.3),
+  colors = c('red', 'black'), hoverinfo = "text+name",
+  text = ~sprintf('MAF: %f\n%s: %f\nSNP: %s',
+      MAF, if_else(Type == "Genotyped", "Empirical R²", "R²"), Quality, SNP),
+  height = 600) %>%
+  layout(title = paste0(params$cohort, ": Quality score by MAF"),
+         xaxis = list(type = "log", range = c(-5, -0.3), title = "Minor Allele Frequency (MAF)"),
+         yaxis = list(range = c(0, 1), title = "Quality (R² for Imputed; Empirical R² for Typed)"),
+         legend = list(orientation = 'h')) %>%
+  config(sendData = FALSE, displaylogo = FALSE, collaborate = FALSE,
+         modeBarButtonsToRemove = list("sendDataToCloud", "lasso2d", "toImage", "autoScale2d")) %>%
+  toWebGL()
+
+shiny::div(
+  style ="height:600;width:100%;border:none;margin:auto;display:block;", fig)
+
+```
