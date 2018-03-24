@@ -2,29 +2,23 @@
 # No trailing / is required.
 directory: .
 
-# Select chromosomes you want to upload
-chr:
-  from: 1
-  to: 22
-  chrlist: ~
-    # use dashes here for list of others
+# Select chromosomes you want to analyse and merge
+#  separate ranges with ":" and listed chromosomes
+#  with ","
+#  You can put both in the same string.
+chroms: "1:22"
 
-# Location of fasta file for flipping and VCFcheck
-ref:
-  /sc/orga/projects/LOAD/Brian/fasta/human_g1k_v37.fasta
-
-# Subject and sample level QC thresholds
+# QC Parameters for filtering and analysis
 qc:
-  #Hardy-Weinberg Equilibrium Cutoff
-  hwe: 0.000001
-  #MAF Cutoff
+  # MAF Cutoff between common and rare
   maf: 0.01
-  #Variant level missingness cutoff
-  geno: 0.05
-  #Subject level missingness cutoff
-  mind: 0.05
+  # Rsq to use with common variants
+  rsq: 0.3
+  # Rsq to use with rare variants (set to NA to use rsq as hard cutoff)
+  rsq2: 0.8
+  # Number of SNPs of each type (Imputed, Typed) to sample for figures
+  sampsize: 100000
 
-# Sample filtering
 
 # filename of samples to include (plink --keep)
 include_samp:
