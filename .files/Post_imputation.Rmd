@@ -3,29 +3,27 @@ title: "Imputation Statistics"
 author: "Shea Andrews and Brian Fulton-Howard"
 output: html_document
 params:
-   #path: /Users/sheaandrews/Desktop/F1/
-   path: ./ADGC_ACT1-2/
+   path: "ADGC_ACT1-2/"
    chrom: "20:22"
-   cohort: Sample
+   cohort: "ADGC: ACT 1-2"
    maf: 0.01 #cutoff between common and rare
    rsq: 0.3 #Rsq to use with common variants
-   rsq2: NA #Rsq to use with rare variants (set to !r NA to use rsq as hard cutoff)
+   rsq2: NA #Rsq to use with rare variants (set to NA to use rsq as hard cutoff)
    sampsize: 100000 #number of SNPs of each type to sample for figures
+   reading: "P" #P for parallel, L for looping (how to read files in)
 ---
 ```{r setup, include=FALSE, warning=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ##---- Requried Pacakges ----##
-
 library(tidyverse) ## data wrangling
 library(ggplot2)   ## plotting
 library(scales)    ## for using commas on ggplot scales
 library(feather)   ## for outputing data to .feather format
 library(kableExtra)## displaing tables nicly in html
-#library(knitr)     ## kniting document (and making tables)
 library(stringr)   ## replace substring for file output
 library(magrittr)
-
-cohort_file <- str_replace(params$cohort, " ", "_")
+library(doParallel)
+library(foreach)
 
 no_rsq2 = is.na(params$rsq2) || params$rsq2 == "NA"
 
@@ -39,8 +37,8 @@ ishtml <- knitr::opts_knit$get("rmarkdown.pandoc.to") == "html"
 
 samp_pretty <- prettyNum(params$sampsize, big.mark=",", preserve.width="none")
 
+## Parse the chromosome list
 
-##  Read in chromsome info files (chr*.info.gz) from HRC imputation, filtering by the chromosome list.
 chr_parse <- function(chr_arg) {
   chr_arg <- unlist(strsplit(chr_arg, ","))
   chrom <- c()
@@ -48,59 +46,78 @@ chr_parse <- function(chr_arg) {
     ii <- unlist(strsplit(i, ":"))
     chrom <- append(chrom, ii[1]:ii[length(ii)])
   }
-  chrom
+  return(chrom)
 }
 
-chrom <- chr_parse(params$chrom)
+##  Read in chromsome info files (chr*.info.gz) from HRC imputation, filtering by the chromosome list.
 
-myFiles <- list.files(path = params$path, pattern = "*.info.gz")
-files_use = c()
-chroms_missing = c()
-for (i in chrom){
-  ch = paste0("chr",i,".info.gz")
-  chrom_present = grepl(ch, myFiles)
-  if (any(chrom_present)) {
-    files_use[length(files_use) + 1] <- ch
-  } else {
-    chroms_missing[length(chroms_missing) + 1] <- i
-    warning(sprintf("Chromosome %i is missing from disk.", i))
+choose_files <- function(path, chrom) {
+  f_list <- list.files(path = path, pattern = "*.info.gz")
+  files_use = c()
+  chroms_missing = c()
+  for (i in chrom) {
+    ch = paste0("chr",i, ".info.gz")
+    chrom_present = grepl(ch, f_list)
+    if (any(chrom_present)) {
+      files_use[length(files_use) + 1] <- ch
+    } else {
+      chroms_missing[length(chroms_missing) + 1] <- i
+      warning(sprintf("Chromosome %i is missing from disk.", i))
+    }
   }
+  return(files_use)
 }
-myFiles <- files_use
+
+myFiles <- choose_files(params$path, chr_parse(params$chrom))
 ```
 
-```{r data, include=FALSE, warning=FALSE}
+```{r data, include=FALSE, warning=FALSE, message=FALSE}
 ##---- Data Wrangling ----##
-##  empty list for reading files into
-data.ls <- list()
 
-##  Loop through chromsome files to read them into R
-# replace '-' with NA
-# seperate chr:pos into sepeate columns
-# change pos and EmpRsq to numeric varibles
-# create new varible with MAF bins
-for(i in myFiles){
-    dat.raw <- read_tsv(paste0(params$path,i), col_types = 'cccnnnncnnncc', na = c("-"))
-    dat <- dat.raw %>%
-      separate(SNP, c('CHR', 'POS'), sep = ":") %>%
-      mutate(POS = as.integer(POS)) %>%
-      unite(SNP, c(CHR, POS, 'REF(0)', 'ALT(1)'), sep = ':', remove = F) %>%
-      mutate(maf.cat = cut(MAF, breaks=c(-Inf, 0.0005, 0.001, 0.005, 0.01, 0.02, 0.05, Inf),
-                           labels=c('< 0.05%', '0.05% to 0.1%', '0.1% to 0.5%', '0.5% to 1%', '1% to 2%', '2% to 5%', '≥ 5%'))) %>%
-      select(SNP, CHR, POS, MAF, Rsq, EmpRsq, Genotyped, maf.cat)
-    data.ls[[i]] <- dat
-    cat(paste0("Chr: ", i, "\n"))
+##  Read info files into R
+read_info <- function(f) {
+  message(sprintf("Loading %s...", f))
+  #Read MAF, Rsq, and EmpRsq as numeric, replacing '-' with NA
+  dat.raw <- read_tsv(f, col_types = 'cccnnnncnnncc', na = c("-"))
+  dat <- dat.raw %>%
+    #Seperate CHR:POS columns
+    separate(SNP, c('CHR', 'POS'), sep = ":") %>%
+    #Turn Position into an integer
+    mutate(POS = as.integer(POS)) %>%
+    #Make SNP column with CHROM:POS:REF:ALT
+    unite(SNP, c(CHR, POS, 'REF(0)', 'ALT(1)'), sep = ':', remove = F) %>%
+    #Select only relevant columns
+    select(SNP, CHR, POS, MAF, Rsq, EmpRsq, Genotyped)
+}
+
+myPathFiles <- paste0(params$path, myFiles)
+if (params$reading == "P") {
+  registerDoParallel(cores = 4)
+  dat <- foreach(i = myPathFiles, .combine = rbind) %dopar% read_info(i)
+} else {
+  dat = list()
+  for ( i in myPathFiles ) {
+    dat[[i]] <- read_info(i)
   }
+  dat %<>% combine
+}
 
-# bind data frame together and relevel CHR
-dat <- bind_rows(data.ls)
+# create new varible with MAF bins
+mafbin.break <- c(-Inf, 0.0005, 0.001, 0.005, 0.01, 0.02, 0.05, Inf)
+mafbin.labs <- c('< 0.05%', '0.05% to 0.1%', '0.1% to 0.5%',
+                 '0.5% to 1%', '1% to 2%', '2% to 5%', '≥ 5%')
+dat %<>% mutate(maf.cat = cut(MAF, breaks = mafbin.break,
+                              labels = mafbin.labs))
+
+# Relevel CHR
 dat$CHR <- factor(dat$CHR, levels = c(1:22), labels = c(1:22))
 
 ## calculate number of typed/imputed SNPs
 imputed.snps <- length(dat[dat$Genotyped == 'Imputed',]$SNP)
 typed.snps <- length(dat[dat$Genotyped == 'Genotyped',]$SNP)
 
-##  Subsample either 50k imputed and genotyped SNPs OR if less then 50k SNPs avalibe, all SNPs
+##  Subsample either the set number of imputed and genotyped SNPs
+##    OR if less then the set number of SNPs avalibe, all SNPs
 sampsize = params$sampsize
 datImput.smallsamp <- dat %>%
   filter(Genotyped == 'Imputed') %>%
@@ -176,6 +193,7 @@ if ( no_rsq2 ) {
 }
 
 ## save the table to disk
+cohort_file <- str_replace(params$cohort, " ", "_")
 write_csv(dat.out, paste0(params$path, 'SNPcount', cohort_file, '.csv'))
 ```
 
