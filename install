@@ -2,15 +2,13 @@
 
 : ${prefix:="."}
 : ${delete:=0}
-: ${checkVCF:=1}
 
-while getopts ":cdp:*" option
+while getopts ":dp:*" option
 do
  case "${option}"
  in
  p) prefix=${OPTARG};;
  d) delete=1;;
- c) checkVCF=0;;
  *) echo "Invalid option!"
  esac
 done
@@ -41,49 +39,8 @@ fi
 echo Making directory
 mkdir -p ${prefix}/scripts
 
-checkEnv=0
-
-ins_loc () {
-  echo Installing local python2 environment
-  if [ ! -d .files/scripts/checkEnv ]; then
-    conda create -y -p ${prefix}/scripts/checkEnv python=2.7
-  else
-    cp -r .files/scripts/checkEnv ${prefix}/scripts/
-  fi
-}
-
-ask_where () {
-  prompt=('\e[1;32m'
-  '\bInstall Conda env for checkVCF globally? (y/N):'
-  '\e[0m ')
-  printf "${prompt[*]}"
-  [[ -t 0 ]] && {                   # Timeout 10 seconds (read -t 5)
-  read -t 10 -n 1 install_global || # read 'fails' on timeout
-  install_global=n ; }              # Timeout => answer No
-  echo ""
-  if [[ $install_global =~ y|Y ]]; then
-    conda create -y --name checkVCF python=2.7
-    checkEnv=1
-  else
-    ins_loc
-  fi
-}
-
-if [ $checkVCF -eq 1 ]; then
-  echo Checking for checkVCF environment
-  if grep -q "checkVCF" <(conda env list | grep -oP '^\w+(?=\s)'); then
-    echo checkVCF environment already exists
-  else
-    ask_where
-  fi # if global conda env not exist
-fi # if install checkVCF
-
-echo Ensuring Flippyr is installed
-
-python -c "import flippyr" &>/dev/null
-if [ $? -ne 0 ]; then
-  pip install flippyr
-fi
+echo Installing R packages:
+R .files/installRpackages.R --vanilla --slave
 
 echo Copying files
 for i in .files/{Snakefile,cluster.yaml,config.yaml,run}; do
@@ -93,30 +50,10 @@ done
 cp .files/scripts/parse_config.py ${prefix}/scripts/
 cp .files/scripts/__init__.py ${prefix}/scripts/
 
-if [ $checkVCF -eq 1 ]; then
-  cp .files/scripts/checkVCF.py ${prefix}/scripts/
-fi
-
 mkdir ${prefix}/.snakejob
 
 echo Adding Anaconda path to config file
 echo "anaconda: $(conda info --root)/bin" >> ${prefix}/config.yaml
-
-
-if [ $checkVCF -eq 1 ]; then
-  echo "Enabling checkVCF in config file"
-  echo "check_vcf: True" >> ${prefix}/config.yaml
-  if [ $checkEnv -eq 1 ]; then
-    echo foo
-    echo "checkEnv: ./scripts/checkEnv" >> ${prefix}/config.yaml
-  else
-    echo bar
-    echo "checkEnv: checkVCF" >> ${prefix}/config.yaml
-  fi
-else
-  echo "Disabling checkVCF in config file"
-  echo "check_vcf: False" >> ${prefix}/config.yaml
-fi
 
 if [ $delete -eq 1 ]; then
   echo "Deleting install files."
