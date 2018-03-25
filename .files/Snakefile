@@ -9,7 +9,7 @@ BPLINK = ["bed", "bim", "fam"]
 
 from scripts.parse_config import parser
 
-CHROM, SAMPLE, INPATH = parser(config)
+CHROM, SAMPLE, INPATH, KEEP_COMMAND = parser(config)
 
 localrules: all, var_qc, subj_qc, split_to_vcf
 
@@ -18,26 +18,26 @@ rule all:
         expand("stats/{sample}_impStats.html", sample=SAMPLE)
 
 rule stats:
-    input: "Post_imputation.Rmd"
+    input: "scripts/Post_imputation.Rmd"
     output: "stats/{sample}_impStats.html"
     params:
-        path = INPATH + "/{sample}/",
+        path = INPATH + "{sample}/",
         chrom = config["chroms"],
         cohort = "{sample}",
         maf = config["qc"]["maf"],
         rsq = config["qc"]["rsq"],
         rsq2 = config["qc"]["rsq2"],
-        sampsize = config["qc"]["sampsize"]
+        sampsize = config["qc"]["sampsize"],
         out = "{sample}_impStats.html",
         output_dir = "stats"
     shell:
-        """module load R/3.4.3 pandoc;
-           R -e 'rmarkdown::render(
-              "{input}", output_file = "{params.out}", \
-              output_dir = {params.output_dir}, params = list(\
-              path = "{params.path}", cohort = "{params.cohort}", \
-              chrom = "{params.chrom}", maf = {params.maf}, \
-              rsq = {params.rsq}, rsq2 = {params.rsq2}))' --slave
+        "module load R/3.4.3 pandoc; "
+        "R -e 'rmarkdown::render("
+        """"{input}", output_file = "{params.out}", \
+output_dir = "{params.output_dir}", params = list(\
+path = "{params.path}", cohort = "{params.cohort}", \
+chrom = "{params.chrom}", maf = {params.maf}, \
+rsq = {params.rsq}, rsq2 = {params.rsq2}))' --slave
         """
 
 #Pre-split QC

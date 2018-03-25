@@ -17,19 +17,20 @@ def parse_chrom(chrs):
 
 
 def fix_path(path):
-    if path[-1] != '/':
-        path += '/'
+    path = os.path.abspath(path) + '/'
     return path
 
 
 def build_samp(in_path):
-    return [directory[2:] for directory,y,files in os.walk(in_path)
+    p = os.path.abspath(in_path)
+    p = [directory for directory,y,files in os.walk(p)
             if any("info.gz" in f for f in files)]
+    return [os.path.basename(x) for x in p]
 
 
 def parser(config):
     # Construct chromosome list
-    chrom = parse_chrom(config["chroms"]):
+    chrom = parse_chrom(config["chroms"])
 
     # Figure out samples
     in_path = fix_path(config["directory"])
