@@ -1,28 +1,39 @@
 import re
 import glob
 import shutil
+import os
+
+
+def parse_chrom(chrs):
+    clist = [x.split(":") for x in chrs.split(",")]
+    parsed = []
+    for chrs in clist:
+        if len(chrs) == 2:
+            chrs = [str(c) for c in range(int(chrs[0]), int(chrs[1]) + 1)]
+        elif len(chrs) != 1:
+            raise ValueError("Invalid chromosome list.")
+        parsed += chrs
+    return parsed
+
+
+def fix_path(path):
+    if path[-1] != '/':
+        path += '/'
+    return path
+
+
+def build_samp(in_path):
+    return [directory[2:] for directory,y,files in os.walk(in_path)
+            if any("info.gz" in f for f in files)]
+
 
 def parser(config):
     # Construct chromosome list
-    if not config["chr"]["chrlist"]:
-        chrom_list = []
-    else:
-        chrom_list = config["chr"]["chrlist"]
-    chrom = list(range(config["chr"]["from"],
-                 config["chr"]["to"]+1))
-    chrom += chrom_list
+    chrom = parse_chrom(config["chroms"]):
 
-    # Retrieve input path and make sure it ends in a /
-    in_path = config["directory"]
-    if in_path[-1] != '/':
-        in_path += '/'
-
-    # Get list of all .bed files
-    beds = glob.iglob(in_path + "*.bed")
-
-    # Sample is every base name for the .bed files in the in_path directory
-    expression = r"(^.*\/)(.*)(?=\.bed)"
-    sample =  [re.search(expression, x)[2] for x in  beds]
+    # Figure out samples
+    in_path = fix_path(config["directory"])
+    sample = build_samp(in_path)
 
     # Make copy file with exclusions, else make empty one
     if "exclude_samp" in config:
