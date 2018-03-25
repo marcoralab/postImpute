@@ -9,3 +9,4 @@ stats:
   cores: 4
   mem: 8000
   partition: mothra #bode segfaults
+  time: '0:30'
