@@ -39,8 +39,10 @@ fi
 echo Making directory
 mkdir -p ${prefix}/scripts
 
+echo Loading R:
+module load R
 echo Installing R packages:
-R .files/installRpackages.R --vanilla --slave
+Rscript .files/installRpackages.R --vanilla --slave
 
 echo Copying files
 for i in .files/{Snakefile,cluster.yaml,config.yaml,run}; do
