@@ -13,9 +13,23 @@ CHROM, SAMPLE, INPATH, KEEP_COMMAND = parser(config)
 
 localrules: all, var_qc, subj_qc, split_to_vcf
 
+# Change filtering based on presence of rsq2
+qualfilt = "(R2 >= {R2} && MAF >= {MAF})".format(
+    R2 = config["qc"]["rsq"], MAF = config["qc"]["maf"])
+if config["qc"]["rsq2"]:
+    qualfilt += " || (R2 >= {R2} && MAF < {MAF})".format(
+        R2 = config["qc"]["rsq2"], MAF = config["qc"]["maf"])
+
+# remove subjects if sample filtering file is provided
+sampfilt = ""
+if config["exclude_samp"]:
+    sampfilt += " --samples-file {}".format(config["exclude_samp"])
+
 rule all:
     input:
-        expand("stats/{sample}_impStats.html", sample=SAMPLE)
+        expand("stats/{sample}_impStats.html", sample=SAMPLE),
+        expand("data/{sample}_filtered.bgen", sample=SAMPLE)
+        "data/all_filtered.bgen"
 
 rule stats:
     input: "scripts/Post_imputation.Rmd"
@@ -40,95 +54,62 @@ chrom = "{params.chrom}", maf = {params.maf}, \
 rsq = {params.rsq}, rsq2 = {params.rsq2}))' --slave
         """
 
-#Pre-split QC
-
-'''
-rule var_qc:
-    input:
-        expand(INPATH + "{{sample}}.{ext}", ext=BPLINK)
-    output:
-        plink = expand("data/plink/{{sample}}_varqc.{ext}", ext=BPLINK)
+rule filters:
+    input: INPATH + "/{sample}/chr{chrom}.dose.vcf.gz"
+    output: "/data/by_chrom/{sample}_chr{chrom}_filtered.vcf.gz"
     params:
-        ins = INPATH + "{sample}",
-        out = "data/plink/{sample}_varqc",
-        geno = config["qc"]["geno"],
-        hwe = config["qc"]["hwe"],
-        maf = config["qc"]["maf"]
-    threads: 1
-    shell: "module load plink/1.90; "
-        "plink -bfile {params.ins} --geno {params.geno} --memory 128 "
-        "--keep-allele-order --hwe {params.hwe} --maf {params.maf} "
-        "--make-bed --out {params.out} --silent"
+        filt = qualfilt,
+        sf = sampfilt
+    shell: "module load bcftools; "
+        """bcftools annotate -i "%FILTER='GENOTYPED' || {params.filt}" """
+        "-Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT'{params.sf}"
 
-rule subj_qc:
-    input:
-        plink = rules.var_qc.output.plink
+rule concat_chroms:
+    input: expand("/data/by_chrom/{{sample}}_chr{chrom}_filtered.vcf.gz",
+                  chrom = CHROM)
+    output: "/data/{sample}_filtered.vcf.gz"
+    threads: 4
+    shell: "module load bcftools; "
+        "bcftools concat -o {output} -Oz --threads 4 {input}"
+
+rule: merge_samples:
+    input: expand("/data/{sample}_filtered.vcf.gz", sample = SAMPLE)
+    output: "/data/all_filtered.vcf.gz"
+    threads: 4
+    shell: "module load bcftools; "
+        "bcftools merge -o {output} -Oz --threads 4 {input}"
+
+rule make_gen_samp: #make oxford dosage files
+    input: "/data/{sample}_filtered.vcf.gz"
+    output:
+        gen = temp("/data/{sample}_filtered.gen"),
+        samp = "/data/{sample}_filtered.sample"
     params:
-        ins = rules.var_qc.params.out,
-        out = "data/plink/{sample}_indivqc",
-        mind = config["qc"]["mind"],
-        keep = keep_command
-    output:
-        expand("data/plink/{{sample}}_indivqc.{ext}", ext=BPLINK)
-    threads: 1
-    shell: "module load plink/1.90; "
-        "plink -bfile {params.ins} --memory 128 --keep-allele-order "
-        "--mind {params.mind} --remove samp.irem {params.keep}"
-        "--make-bed --out {params.out} --silent"
+        ox = "/data/{sample}_filtered"
+    shell:
+        "plink2 --vcf {input} dosage=DS --export oxford --out {params.ox}
 
-rule flippyr:
-    input:
-        fasta = config["ref"],
-        plink = rules.subj_qc.output
+rule make_bgen_samp:
+    input: rules.make_gen.output
+    output:
+        bgen = "data/{sample}_filtered.bgen",
+        samp = "data/{sample}_filtered.fixed.sample"
+    shell:
+        "awk 'NR > 1 {$1=$2} 1' {input.samp} > {output.samp}; "
+        "qctool -g {input.gen} -s {output.samp} -og {output.bgen}"
+
+rule make_gen_all: #make oxford dosage files
+    input: "/data/all_filtered.vcf.gz"
+    output:
+        gen = temp("/data/all_filtered.gen"),
+        samp = "/data/all_filtered.sample"
     params:
-        out = "data/plink/{sample}",
-        suff = "_refmatched"
+        ox = "/data/all_filtered"
+    shell: rules.make_gen_samp.shell
+
+rule make_bgen_all:
+    input: rules.make_gen_all.output
     output:
-        expand("data/plink/{{sample}}.{ext}", ext=["allele","flip","delete","log","log.tab"]),
-        command = "data/plink/{sample}.runPlink",
-        plink = expand("data/plink/{{sample}}_refmatched.{ext}", ext=BPLINK)
-    run:
-        import flippyr
-        flippyr.writeFiles(input["fasta"],input["plink"][1],params["out"],
-                           silent=False,plink=False,p_suff=params["suff"])
-        shell("module load plink/1.90; bash {}".format(output["command"]))
-
-# Split, sort and compress
-
-rule split_to_vcf: #Split plink files into chromosomes.
-    input:
-        rules.flippyr.output.plink
-    params:
-        ins = "data/plink/{sample}_refmatched",
-        out = "data/{sample}_chr{chrom}_unsorted",
-        c = "{chrom}"
-    output:
-        "data/{sample}_chr{chrom}_unsorted.vcf"
-    shell: "module load plink/1.90; "
-        "plink -bfile {params.ins} --chr {params.c} "
-        "--memory 256 --real-ref-alleles "
-        "--recode vcf --out {params.out}"
-
-rule compress_vcf:
-    input:
-        rules.split_to_vcf.output
-    output:
-        "final/{sample}_chr{chrom}.vcf.gz"
-    threads: 8
-    shell: "module load tabix/0.2.6 bcftools/1.7; "
-        "bcftools sort {input} -Oz -o {output}; tabix -p vcf {output}"
-
-if config['check_vcf']:
-    rule check_vcf:
-        input:
-            fasta=config["ref"],
-            vcf="final/{sample}_chr{chrom}.vcf.gz"
-        output:
-            "log/{sample}_chr{chrom}.check.log"
-        params:
-            py_env=config["checkEnv"]
-        log: "log/{sample}_chr{chrom}"
-        shell:
-            "source activate {params.py_env}; "
-            "python scripts/checkVCF.py -r {input.fasta} -o {log} {input.vcf}"
-'''
+        bgen = "data/all_filtered.bgen",
+        samp = "data/all_filtered.fixed.sample"
+    shell: make_bgen_samp.shell
