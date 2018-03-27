@@ -11,8 +11,6 @@ from scripts.parse_config import parser
 
 CHROM, SAMPLE, INPATH, KEEP_COMMAND = parser(config)
 
-localrules: all, var_qc, subj_qc, split_to_vcf
-
 # Change filtering based on presence of rsq2
 qualfilt = "(R2 >= {R2} && MAF >= {MAF})".format(
     R2 = config["qc"]["rsq"], MAF = config["qc"]["maf"])
@@ -28,7 +26,7 @@ if config["exclude_samp"]:
 rule all:
     input:
         expand("stats/{sample}_impStats.html", sample=SAMPLE),
-        expand("data/{sample}_filtered.bgen", sample=SAMPLE)
+        expand("data/{sample}_filtered.bgen", sample=SAMPLE),
         "data/all_filtered.bgen"
 
 rule stats:
@@ -45,7 +43,7 @@ rule stats:
         out = "{sample}_impStats.html",
         output_dir = "stats"
     shell:
-        "module load R/3.4.3 pandoc; "
+        "module load R/3.4.3; PATH=$(PWD):$PATH; "
         "R -e 'rmarkdown::render("
         """"{input}", output_file = "{params.out}", \
 output_dir = "{params.output_dir}", params = list(\
@@ -55,61 +53,65 @@ rsq = {params.rsq}, rsq2 = {params.rsq2}))' --slave
         """
 
 rule filters:
-    input: INPATH + "/{sample}/chr{chrom}.dose.vcf.gz"
-    output: "/data/by_chrom/{sample}_chr{chrom}_filtered.vcf.gz"
+    input: INPATH + "{sample}/chr{chrom}.dose.vcf.gz"
+    output: "data/by_chrom/{sample}_chr{chrom}_filtered.vcf.gz"
     params:
         filt = qualfilt,
         sf = sampfilt
     shell: "module load bcftools; "
         """bcftools annotate -i "%FILTER='GENOTYPED' || {params.filt}" """
-        "-Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT'{params.sf}"
+        "-Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT'{params.sf} {input}"
 
 rule concat_chroms:
-    input: expand("/data/by_chrom/{{sample}}_chr{chrom}_filtered.vcf.gz",
-                  chrom = CHROM)
-    output: "/data/{sample}_filtered.vcf.gz"
+    input: expand("data/by_chrom/{{sample}}_chr{chrom}_filtered.vcf.gz", chrom = CHROM)
+    output: "data/{sample}_chrall_filtered.vcf.gz"
     threads: 4
     shell: "module load bcftools; "
         "bcftools concat -o {output} -Oz --threads 4 {input}"
-
-rule: merge_samples:
-    input: expand("/data/{sample}_filtered.vcf.gz", sample = SAMPLE)
-    output: "/data/all_filtered.vcf.gz"
+rule merge_samples:
+    input: expand("data/{sample}_chrall_filtered.vcf.gz", sample = SAMPLE)
+    output: "data/all_filtered.vcf.gz"
     threads: 4
     shell: "module load bcftools; "
         "bcftools merge -o {output} -Oz --threads 4 {input}"
 
 rule make_gen_samp: #make oxford dosage files
-    input: "/data/{sample}_filtered.vcf.gz"
+    input: "data/{sample}_chrall_filtered.vcf.gz"
     output:
-        gen = temp("/data/{sample}_filtered.gen"),
-        samp = "/data/{sample}_filtered.sample"
+        gen = temp("data/{sample}_filtered.gen"),
+        samp = "data/{sample}_filtered.sample"
     params:
-        ox = "/data/{sample}_filtered"
+        ox = "data/{sample}_filtered"
     shell:
-        "plink2 --vcf {input} dosage=DS --export oxford --out {params.ox}
+        "plink2 --vcf {input} dosage=DS --export oxford --out {params.ox}"
 
+#import pdb; pdb.set_trace()
 rule make_bgen_samp:
-    input: rules.make_gen.output
+    input:
+      samp = rules.make_gen_samp.output[1],
+      gen= rules.make_gen_samp.output[0]
     output:
         bgen = "data/{sample}_filtered.bgen",
         samp = "data/{sample}_filtered.fixed.sample"
     shell:
-        "awk 'NR > 1 {$1=$2} 1' {input.samp} > {output.samp}; "
+        "awk 'NR > 1 {{$1=$2}} 1' {input.samp} > {output.samp}; "
         "qctool -g {input.gen} -s {output.samp} -og {output.bgen}"
 
 rule make_gen_all: #make oxford dosage files
-    input: "/data/all_filtered.vcf.gz"
+    input: "data/all_filtered.vcf.gz"
     output:
-        gen = temp("/data/all_filtered.gen"),
-        samp = "/data/all_filtered.sample"
+        gen = temp("data/all_filtered.gen"),
+        samp = "data/all_filtered.sample"
     params:
-        ox = "/data/all_filtered"
-    shell: rules.make_gen_samp.shell
+        ox = "data/all_filtered"
+    shell: rules.make_gen_samp.shellcmd
 
 rule make_bgen_all:
-    input: rules.make_gen_all.output
+    input:
+        samp = rules.make_gen_all.output[1],
+        gen= rules.make_gen_all.output[0]
     output:
         bgen = "data/all_filtered.bgen",
         samp = "data/all_filtered.fixed.sample"
-    shell: make_bgen_samp.shell
+    shell: rules.make_bgen_samp.shellcmd
+
