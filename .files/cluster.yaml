@@ -2,11 +2,18 @@ __default__:
   project: acc_LOAD
   partition: bode
   queue: premium
-  cores: 2
-  mem: 3000
-  time: '0:01'
-stats:
   cores: 4
-  mem: 8000
+  mem: 2000
+  time: '10'
+stats:
+  mem: 4000
   partition: mothra #bode segfaults
   time: '0:30'
+filters:
+  time: '15'
+make_gen_samp:
+  cores: 1
+  mem: 8000
+make_gen_all:
+  cores: 1
+  mem: 8000
