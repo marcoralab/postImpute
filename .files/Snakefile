@@ -58,6 +58,7 @@ rule filters:
     params:
         filt = qualfilt,
         sf = sampfilt
+    threads: 4
     shell: "module load bcftools; "
         """bcftools annotate -i "%FILTER='GENOTYPED' || {params.filt}" """
         "-Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT'{params.sf} {input}"
@@ -68,6 +69,7 @@ rule concat_chroms:
     threads: 4
     shell: "module load bcftools; "
         "bcftools concat -o {output} -Oz --threads 4 {input}"
+
 rule merge_samples:
     input: expand("data/{sample}_chrall_filtered.vcf.gz", sample = SAMPLE)
     output: "data/all_filtered.vcf.gz"
