@@ -13,4 +13,4 @@ bsub=("bsub -K -J $jname:{rule}:{wildcards}"
 "-eo .snakejob/{rule}:{wildcards}.stderr < ")
 
 snakemake -u cluster.yaml --cluster-sync "${bsub[*]}" \
-  --local-cores 4 --max-jobs-per-second 1 "$@"
+  --local-cores 4 --max-jobs-per-second 5 "$@"

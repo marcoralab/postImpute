@@ -2,6 +2,15 @@
 # No trailing / is required.
 directory: .
 
+outputs: # Comment out any line with outputs you don't want
+  - stat_report # A report of imputation quality
+  - vcf_bycohort # Bgzipped VCF files for each cohort
+  - vcf_merged # A bgzipped VCF with all cohorts
+  - bgen_bycohort # Binary oxford filesets for each cohort
+  - bgen_merged # A binary oxford fileset with all cohorts
+  - plink_bycohort # Binary plink filesets for each cohort
+  - plink_merged # A binary plink fileset with all cohorts
+
 # Select chromosomes you want to analyse and merge
 #  separate ranges with ":" and listed chromosomes
 #  with ","
@@ -20,12 +29,14 @@ qc:
   sampsize: 100000
 
 
-# filename of samples to include (plink --keep)
+# filename of samples to include
 include_samp:
 
-# filename of samples to exclude (plink --remove)
+# filename of samples to exclude
 exclude_samp:
 
+# filename of sample renaming mapping file:
+rename:
 # --keep accepts a space/tab-delimited text file with
 # family IDs in the first column and within-family IDs
 # in the second column, and removes all unlisted samples
