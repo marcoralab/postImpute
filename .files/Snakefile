@@ -9,14 +9,25 @@ BPLINK = ["bed", "bim", "fam"]
 
 from scripts.parse_config import parser
 from getpass import getuser
+
+
 CHROM, SAMPLE, INPATH, KEEP_COMMAND = parser(config)
 
 tempdir = "/sc/orga/scratch/{}/temp/".format(getuser())
 
+def flatten(nested):
+    flat = []
+    for el in nested:
+       if not isinstance(el, list):
+           flat.append(el)
+       else:
+           flat += flatten(el)
+    return flat
+
 # Change filtering based on presence of rsq2
 qualfilt = "(R2 >= {R2} && MAF >= {MAF})".format(
     R2 = config["qc"]["rsq"], MAF = config["qc"]["maf"])
-if config["qc"]["rsq2"]:
+if config["qc"]["rsq2"] and config["qc"]["rsq2"] != 'NA':
     qualfilt += " || (R2 >= {R2} && MAF < {MAF})".format(
         R2 = config["qc"]["rsq2"], MAF = config["qc"]["maf"])
 
@@ -41,6 +52,7 @@ outputs = dict(
               )
 
 outputs = [outputs[x] for x in config["outputs"]]
+outputs = flatten(outputs)
 
 rule all:
     input: outputs
@@ -77,12 +89,12 @@ rule filters:
     threads: 8
     shell: "module load bcftools; "
         """bcftools annotate -i "%FILTER='GENOTYPED' || {params.filt}" -Oz -o {output} """
-        "--set-id '%CHROM:%POS:%REF:%ALT' --threads 8{params.sf} {input}"
+        "--set-id '%CHROM:%POS:%REF:%ALT' --threads 8 {params.sf} {input}"
 
 rule rename:
     input:
         vcf = rules.filters.output,
-        mapping = config['rename']
+        mapping = config['rename'] if config['rename'] else ""
     output: "data/by_chrom/{sample}_chr{chrom}_filtered_renamed.vcf.gz"
     shell: "module load bcftools; "
         "bcftools reheader --samples {input.mapping} -o {output} {input.vcf}"
@@ -203,4 +215,3 @@ rule cat_bgen_allsamp:
     shell: "module load bgen; "
         "cat-bgen -g {input.gen} -og {output.gen}; "
         "cp {input.samp} {output.samp}"
-
