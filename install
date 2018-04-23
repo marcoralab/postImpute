@@ -57,7 +57,7 @@ mkdir ${prefix}/.snakejob
 
 echo Adding Anaconda path to config file
 
-pypath="$(dirname '$(which python)')"
+pypath="$(dirname $(which python))"
 is_conda="$(echo $pypath | grep anaconda | wc -l)"
 
 if [ $is_conda -eq 1 ]; then
