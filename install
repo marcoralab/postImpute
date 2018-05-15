@@ -49,13 +49,24 @@ for i in .files/{Snakefile,cluster.yaml,config.yaml,run}; do
   cp $i $prefix
 done
 
-cp .files/scripts/parse_config.py ${prefix}/scripts/
-cp .files/scripts/__init__.py ${prefix}/scripts/
+for i in .files/scripts/{__init__.py,parse_config.py,Post_imputation.Rmd}; do
+  cp $i ${prefix}/scripts/
+done
 
 mkdir ${prefix}/.snakejob
 
 echo Adding Anaconda path to config file
-echo "anaconda: $(conda info --root)/bin" >> ${prefix}/config.yaml
+
+pypath="$(dirname $(which python))"
+is_conda="$(echo $pypath | grep anaconda | wc -l)"
+
+if [ $is_conda -eq 1 ]; then
+  echo "anaconda: $pypath" >> ${prefix}/config.yaml
+else
+  echo "Could not find anaconda path. Please enter Anaconda3 path manually."
+  echo "anaconda: " >> ${prefix}/config.yaml
+fi
+
 
 if [ $delete -eq 1 ]; then
   echo "Deleting install files."
