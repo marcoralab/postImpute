@@ -1,4 +1,4 @@
-# imputePrep
+# postImpute
 
 A Snakemake pipeline to process the output from the Michigan Imputation Server.
 
