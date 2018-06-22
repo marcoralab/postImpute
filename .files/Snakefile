@@ -1,5 +1,5 @@
 '''Snakefile for MIS post-imputation QC
-   Version 0.1'''
+   Version 0.1.1'''
 
 from scripts.parse_config import parser
 from getpass import getuser
@@ -153,7 +153,7 @@ rule merge_samples_chrom:
     threads: 8
     shell:
         "module load bcftools; "
-        "bcftools merge -o {output} -Oz --threads 8 {input.vcf}"
+        "bcftools merge -m none -o {output} -Oz --threads 8 {input.vcf}"
 
 rule concat_chroms_all:
     input: expand("data/by_chrom/all_chr{chrom}_filtered.vcf.gz", chrom=CHROM)
@@ -162,20 +162,6 @@ rule concat_chroms_all:
     shell:
         "module load bcftools; "
         "bcftools concat -o {output} -Oz --threads 8 {input}"
-
-rule make_gen:  # make oxford dosage files
-    input: renamed
-    output:
-        gen = temp(tempdir + "{sample}_chr{chrom}_filtered.gen.gz"),
-        samp = temp(tempdir + "{sample}_chr{chrom}_raw.sample")
-    params:
-        ox = tempdir + "{sample}_chr{chrom}_filtered"
-    threads: 10
-    shell:
-        "module load plink2/dev.26mar; "
-        "plink2 --vcf {input} dosage=DS --memory 10000 --threads 10 "
-        "--export oxford bgz --out {params.ox}; "
-        "mv {params.ox}.sample {output.samp}"
 
 rule make_plink_all:
     input: rules.concat_chroms_all.output
@@ -201,15 +187,14 @@ rule make_plink_samp:
 
 rule make_bgen:
     input:
-        gen = rules.make_gen.output[0],
-        samp = rules.make_gen.output[1]
+        gen = renamed
     output:
         bgen = temp(tempdir + "{sample}_chr{chrom}_filtered.bgen"),
         samp = temp(tempdir + "{sample}_chr{chrom}.sample")
     shell:
         "module load qctool/v2; "
-        "awk 'NR > 1 {{$1=$2}} 1' {input.samp} > {output.samp}; "
-        "qctool -g {input.gen} -s {output.samp} -og {output.bgen}"
+        "qctool -g {input.gen} -vcf-genotype-field GP "
+        "-os {output.samp} -og {output.bgen}"
 
 rule cat_bgen_samp:
     input:
