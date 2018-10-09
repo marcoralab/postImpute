@@ -4,16 +4,39 @@
 from scripts.parse_config import parser
 from getpass import getuser
 
+import socket
+
+isMinerva = "hpc.mssm.edu" in socket.getfqdn()
+
 configfile: "config.yaml"
 shell.executable("/bin/bash")
-shell.prefix("PATH=" + config["anaconda"] + ":$PATH; ")
+
+if isMinerva:
+    shell.prefix("PATH=" + config["anaconda"] + ":$PATH; ")
+    tempdir = "/sc/orga/scratch/{}/temp/".format(getuser())
+    com = {'plink': 'plink --keep-allele-order', 'plink2': 'plink',
+           'bcftools': 'bcftools', 'R': 'Rscript', 'R2': 'R',
+           'cat-bgen': 'cat-bgen', 'qctool': 'qctool'}
+    loads = {'plink': 'module load plink/1.90',
+             'plink2': 'module load plink2/dev.26mar',
+             'bcftools': 'module load bcftools/1.7',
+             'R': ('module load R/3.4.3 pandoc/2.1.3 udunits/2.2.26; ',
+                   'RSTUDIO_PANDOC=$(which pandoc)'),
+             'qctool': 'module load qctool/v2', 'cat-bgen': 'module load bgen'}
+else:
+    com = {'plink': 'plink --keep-allele-order', 'plink2': 'plink2',
+           'bcftools': 'bcftools', 'R': 'Rscript', 'R2': 'R',
+           'cat-bgen': 'cat-bgen', 'qctool': 'qctool'}
+    loads = {'plink': 'echo running plink', 'plink2': 'echo running plink',
+             'cat-bgen': 'echo using bgen lib',
+             'bcftools': 'echo running bcftools',  'R': 'echo running R',
+             'qctool': 'echo running qctool'}
+    tempdir = "/tmp/"
+
 
 BPLINK = ["bed", "bim", "fam"]
 
 CHROM, SAMPLE, INPATH, KEEP_COMMAND = parser(config)
-
-tempdir = "/sc/orga/scratch/{}/temp/".format(getuser())
-
 
 def flatten(nested):
     flat = []
@@ -35,7 +58,7 @@ if config["qc"]["rsq2"] and config["qc"]["rsq2"] != 'NA':
 # remove subjects if sample filtering file is provided
 sampfilt = ""
 if config["exclude_samp"] or config["include_samp"]:
-    sampfilt += "bcftools view --samples-file "
+    sampfilt += com["bcftools"] + " view --samples-file "
     if config["exclude_samp"]:
         sampfilt += "^{}".format(config["exclude_samp"])
     if config["include_samp"]:
@@ -72,19 +95,20 @@ rule stats:
         out = "{sample}_impStats.html",
         output_dir = "stats"
     shell:
-        "module load R/3.4.3 pandoc/2.1.3; RSTUDIO_PANDOC=$(which pandoc); "
-        "R -e 'rmarkdown::render("
-        """"{input}", output_file = "{params.out}", \
-output_dir = "{params.output_dir}", params = list(\
-path = "{params.path}", cohort = "{params.cohort}", \
-chrom = "{params.chrom}", maf = {params.maf}, \
-rsq = {params.rsq}, rsq2 = {params.rsq2}))' --slave
+        """
+{loads[R]}
+{com[R2]} -e 'rmarkdown::render(
+  "{input}", output_file = "{params.out}", \
+  output_dir = "{params.output_dir}", params = list(\
+  path = "{params.path}", cohort = "{params.cohort}", \
+  chrom = "{params.chrom}", maf = {params.maf}, \
+  rsq = {params.rsq}, rsq2 = {params.rsq2}))' --slave
         """
 
 # Sample filtering rules
 
 filter_in = INPATH + "{sample}/chr{chrom}.dose.vcf.gz"
-filter_annotate = ("bcftools annotate -i \"%FILTER='GENOTYPED' || "
+filter_annotate = (com["bcftools"] + " annotate -i \"%FILTER='GENOTYPED' || "
                    "{params.filt}\" -Oz -o {output} "
                    "--set-id '%CHROM:%POS:%REF:%ALT' --threads 8")
 filter_out = "data/by_chrom/{sample}_chr{chrom}_filtered.vcf.gz"
@@ -98,7 +122,7 @@ if sampfilt:
             sf = sampfilt
         threads: 8
         shell:
-            "module load bcftools; "
+            "{loads[bcftools]}; "
             "{params.sf} --force-samples -Oz --threads 8 {input} | "
             "" + filter_annotate
 
@@ -110,7 +134,7 @@ else:
             filt = qualfilt,
             sf = sampfilt
         threads: 8
-        shell: "module load bcftools; " + filter_annotate + " {input}"
+        shell: "{loads[bcftools]}; " + filter_annotate + " {input}"
 
 rule rename:
     input:
@@ -118,8 +142,8 @@ rule rename:
         mapping = config['rename'] if config['rename'] else ""
     output: "data/by_chrom/{sample}_chr{chrom}_filtered_renamed.vcf.gz"
     shell:
-        "module load bcftools; "
-        "bcftools reheader --samples {input.mapping} -o {output} {input.vcf}"
+        "{loads[bcftools]}; "
+        "{com[bcftools]} reheader --samples {input.mapping} -o {output} {input.vcf}"
 
 if config['rename']:
     renamed_cat = "data/by_chrom/{{sample}}_chr{chrom}_filtered_renamed.vcf.gz"
@@ -135,15 +159,15 @@ rule concat_chroms_samp:
     output: "data/{sample}_chrall_filtered.vcf.gz"
     threads: 8
     shell:
-        "module load bcftools; "
-        "bcftools concat -o {output} -Oz --threads 8 {input}"
+        "{loads[bcftools]}; "
+        "{com[bcftools]} concat -o {output} -Oz --threads 8 {input}"
 
 rule index_samples_chrom:
     input: renamed
     output: renamed + ".tbi"
     shell:
-        "module load bcftools; "
-        "bcftools index -t {input}"
+        "{loads[bcftools]}; "
+        "{com[bcftools]} index -t {input}"
 
 rule merge_samples_chrom:
     input:
@@ -152,16 +176,16 @@ rule merge_samples_chrom:
     output: "data/by_chrom/all_chr{chrom}_filtered.vcf.gz"
     threads: 8
     shell:
-        "module load bcftools; "
-        "bcftools merge -m none -o {output} -Oz --threads 8 {input.vcf}"
+        "{loads[bcftools]}; "
+        "{com[bcftools]} merge -m none -o {output} -Oz --threads 8 {input.vcf}"
 
 rule concat_chroms_all:
     input: expand("data/by_chrom/all_chr{chrom}_filtered.vcf.gz", chrom=CHROM)
     output: "data/all_chrall_filtered.vcf.gz"
     threads: 8
     shell:
-        "module load bcftools; "
-        "bcftools concat -o {output} -Oz --threads 8 {input}"
+        "{loads[bcftools]}; "
+        "{com[bcftools]} concat -o {output} -Oz --threads 8 {input}"
 
 rule make_plink_all:
     input: rules.concat_chroms_all.output
@@ -170,8 +194,8 @@ rule make_plink_all:
         out_plink = "data/all_chrall_filtered"
     threads: 10
     shell:
-        "module load plink2/dev.26mar; "
-        "plink2 --vcf {input} --memory 10000 --threads 10 --make-bed "
+        "{loads[plink2]}; "
+        "{com[plink2]} --vcf {input} --memory 10000 --threads 10 --make-bed "
         "--out {params.out_plink}"
 
 rule make_plink_samp:
@@ -181,8 +205,8 @@ rule make_plink_samp:
         out_plink = "data/{sample}_chrall_filtered"
     threads: 10
     shell:
-        "module load plink2/dev.26mar; "
-        "plink2 --vcf {input} --memory 10000 --threads 10 --make-bed "
+        "{loads[plink2]}; "
+        "{com[plink2]} --vcf {input} --memory 10000 --threads 10 --make-bed "
         "--out {params.out_plink}"
 
 rule make_bgen:
@@ -192,9 +216,10 @@ rule make_bgen:
         bgen = temp(tempdir + "{sample}_chr{chrom}_filtered.bgen"),
         samp = temp(tempdir + "{sample}_chr{chrom}.sample")
     shell:
-        "module load qctool/v2; "
-        "qctool -g {input.gen} -vcf-genotype-field GP "
-        "-os {output.samp} -og {output.bgen}"
+"""{loads[qctool]}
+{com[qctool]} -g {input.gen} -vcf-genotype-field GP \
+-os {output.samp} -og {output.bgen}
+"""
 
 rule cat_bgen_samp:
     input:
@@ -204,9 +229,10 @@ rule cat_bgen_samp:
         gen = "data/{sample}_chrall_filtered.bgen",
         samp = "data/{sample}_chrall.sample"
     shell:
-        "module load bgen; "
-        "cat-bgen -g {input.gen} -og {output.gen}; "
-        "cp {input.samp} {output.samp}"
+        """
+{loads[cat-bgen]}
+{com[cat-bgen]} -g {input.gen} -og {output.gen}
+cp {input.samp} {output.samp}"""
 
 bga_gen = expand(tempdir + "{sample}_chr{{chrom}}_filtered.bgen", sample=SAMPLE)
 bga_samp = expand(tempdir + "{sample}_chr{{chrom}}.sample", sample=SAMPLE)
@@ -222,8 +248,10 @@ rule make_bgen_allsamp:
         args = " ".join(["-g {} -s {}".format(gen, samp) for gen, samp in zip(bga_gen, bga_samp)])
     threads: 10
     shell:
-        "module load qctool/v2; "
-        "qctool {params.args} -og {output.bgen} -os {output.samp} -threads 10"
+        """
+module load qctool/v2
+qctool {params.args} -og {output.bgen} -os {output.samp} -threads 10
+"""
 
 rule cat_bgen_allsamp:
     input:
@@ -233,6 +261,7 @@ rule cat_bgen_allsamp:
         gen = "data/merged/merged_chrall_filtered.bgen",
         samp = "data/merged/merged_chrall.sample"
     shell:
-        "module load bgen; "
-        "cat-bgen -g {input.gen} -og {output.gen}; "
-        "cp {input.samp} {output.samp}"
+        """
+{loads[cat-bgen]}
+{com[cat-bgen]} -g {input.gen} -og {output.gen}
+cp {input.samp} {output.samp}"""
