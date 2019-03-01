@@ -4,21 +4,23 @@
 from scripts.parse_config import parser
 from getpass import getuser
 
+import os
 import socket
 
 isMinerva = "hpc.mssm.edu" in socket.getfqdn()
+RWD = os.getcwd()
 
-configfile: "config.yaml"
+configfile: "./config.yaml"
 shell.executable("/bin/bash")
 
 if isMinerva:
     shell.prefix("PATH=" + config["anaconda"] + ":$PATH; ")
     tempdir = "/sc/orga/scratch/{}/temp/".format(getuser())
-    com = {'plink': 'plink --keep-allele-order', 'plink2': 'plink',
+    com = {'plink': 'plink --keep-allele-order', 'plink2': 'plink2',
            'bcftools': 'bcftools', 'R': 'Rscript', 'R2': 'R',
            'cat-bgen': 'cat-bgen', 'qctool': 'qctool'}
     loads = {'plink': 'module load plink/1.90',
-             'plink2': 'module load plink2/dev.26mar',
+             'plink2': 'module load plink2/dev.2oct',
              'bcftools': 'module load bcftools/1.7',
              'R': ('module load R/3.4.3 pandoc/2.1.3 udunits/2.2.26; ',
                    'RSTUDIO_PANDOC=$(which pandoc)'),
@@ -31,8 +33,7 @@ else:
              'cat-bgen': 'echo using bgen lib',
              'bcftools': 'echo running bcftools',  'R': 'echo running R',
              'qctool': 'echo running qctool'}
-    tempdir = "/tmp/"
-
+    tempdir = "/tmp/{}/postImpute/".format(getuser())
 
 BPLINK = ["bed", "bim", "fam"]
 
@@ -64,15 +65,17 @@ if config["exclude_samp"] or config["include_samp"]:
     if config["include_samp"]:
         sampfilt += "{}".format(config["include_samp"])
 
+plink_bycohort = "data/{sample}_chrall_filtered.{ext}"
+plink_merged = "data/all_chrall_filtered.{ext}"
+
 outs = dict(
     stat_report=expand("stats/{sample}_impStats.html", sample=SAMPLE),
     vcf_bycohort=expand("data/{sample}_chrall_filtered.vcf.gz", sample=SAMPLE),
     vcf_merged="data/all_chrall_filtered.vcf.gz",
     bgen_bycohort=expand("data/{sample}_chrall_filtered.bgen", sample=SAMPLE),
     bgen_merged="data/merged/merged_chrall_filtered.bgen",
-    plink_bycohort=expand("data/{sample}_chrall_filtered.{ext}",
-                          sample=SAMPLE, ext=BPLINK),
-    plink_merged=expand("data/all_chrall_filtered.{ext}", ext=BPLINK)
+    plink_bycohort=expand(plink_bycohort, sample=SAMPLE, ext=BPLINK),
+    plink_merged=expand(plink_merged, ext=BPLINK)
             )
 
 outputs = [outs[x] for x in config["outputs"]]
@@ -97,17 +100,41 @@ rule stats:
     shell:
         """
 {loads[R]}
-{com[R2]} -e 'rmarkdown::render(
+{com[R2]} -e 'rmarkdown::render(\
   "{input}", output_file = "{params.out}", \
   output_dir = "{params.output_dir}", params = list(\
-  path = "{params.path}", cohort = "{params.cohort}", \
-  chrom = "{params.chrom}", maf = {params.maf}, \
-  rsq = {params.rsq}, rsq2 = {params.rsq2}))' --slave
+  path = "{params.path}", outpath = "{params.output_dir}", \
+  cohort = "{params.cohort}", chrom = "{params.chrom}", \
+  maf = {params.maf}, rsq = {params.rsq}, rsq2 = {params.rsq2}))' --slave
         """
 
 # Sample filtering rules
 
-filter_in = INPATH + "{sample}/chr{chrom}.dose.vcf.gz"
+file_in = INPATH + "{sample}/chr{chrom}.dose.vcf.gz"
+
+rule fixheaders:
+    input:
+        vcf = INPATH + "{sample}/chr{chrom}.dose.vcf.gz",
+        tbi = INPATH + "{sample}/chr{chrom}.dose.vcf.gz.tbi",
+    output:
+        vcf = temp(tempdir + "fixedheader/{sample}/chr{chrom}.dose.vcf.gz"),
+        tbi = temp(tempdir + "fixedheader/{sample}/chr{chrom}.dose.vcf.gz.tbi"),
+    threads: 1
+    shell:
+        r"""
+if $(zcat {input} | head -n 40 | grep -q "##FILTER"); then
+  cp {input.vcf} {output.vcf}
+  cp {input.tbi} {output.tbi}
+else
+  {loads[bcftools]}
+  zcat {input.vcf} | sed '/contig/ a\
+##FILTER=<ID=GENOTYPED,Description="Marker was genotyped AND imputed">\
+##FILTER=<ID=GENOTYPED_ONLY,Description="Marker was genotyped but NOT imputed">' | \
+{com[bcftools]} view -Oz -o {output.vcf}
+  {com[bcftools]} index -t {output.vcf}
+fi
+"""
+
 filter_annotate = (com["bcftools"] + " annotate -i \"%FILTER='GENOTYPED' || "
                    "{params.filt}\" -Oz -o {output} "
                    "--set-id '%CHROM:%POS:%REF:%ALT' --threads 8")
@@ -115,44 +142,78 @@ filter_out = "data/by_chrom/{sample}_chr{chrom}_filtered.vcf.gz"
 
 if sampfilt:
     rule filters:
-        input: filter_in
-        output: filter_out
+        input:
+            vcf = rules.fixheaders.output.vcf,
+            tbi = rules.fixheaders.output.tbi
+        output: temp(filter_out)
         params:
             filt = qualfilt,
             sf = sampfilt
         threads: 8
         shell:
             "{loads[bcftools]}; "
-            "{params.sf} --force-samples -Oz --threads 8 {input} | "
+            "{params.sf} --force-samples -Oz --threads 8 {input.vcf} | "
             "" + filter_annotate
 
 else:
     rule filters:
-        input: filter_in
-        output: filter_out
+        input:
+            vcf = rules.fixheaders.output.vcf,
+            tbi = rules.fixheaders.output.tbi
+        output: temp(filter_out)
         params:
             filt = qualfilt,
             sf = sampfilt
         threads: 8
-        shell: "{loads[bcftools]}; " + filter_annotate + " {input}"
+        shell: "{loads[bcftools]}; " + filter_annotate + " {input.vcf}"
+
+# defaults for renaming:
+renamed_cat = "data/by_chrom/{{sample}}_chr{chrom}_filtered.vcf.gz"
+renamed = "data/by_chrom/{sample}_chr{chrom}_filtered.vcf.gz"
+renamed_merge = "data/by_chrom/{sample}_chr{{chrom}}_filtered.vcf.gz"
+automap_tf = False
+rename_tf = False
+
+#override defaults:
+if 'rename' in config:
+    if (config['rename'] is not None and
+        'automap' in config['rename'] and
+        config['rename']['automap']):
+        print("Automatically renaming samples.")
+        automap_tf = True
+        automap = config['rename']['automap']
+        renamed_cat = "data/by_chrom/{{sample}}_chr{chrom}_filtered_fixedIDs.vcf.gz"
+        renamed = "data/by_chrom/{sample}_chr{chrom}_filtered_fixedIDs.vcf.gz"
+        renamed_merge = "data/by_chrom/{sample}_chr{{chrom}}_filtered_fixedIDs.vcf.gz"
+    elif config['rename'] and not type(config['rename']) is dict:
+        print("Manualy renameing samples")
+        renamefile = config['rename']
+        renamed_cat = "data/by_chrom/{{sample}}_chr{chrom}_filtered_renamed.vcf.gz"
+        renamed = "data/by_chrom/{sample}_chr{chrom}_filtered_renamed.vcf.gz"
+        renamed_merge = "data/by_chrom/{sample}_chr{{chrom}}_filtered_renamed.vcf.gz"
 
 rule rename:
     input:
         vcf = rules.filters.output,
-        mapping = config['rename'] if config['rename'] else ""
-    output: "data/by_chrom/{sample}_chr{chrom}_filtered_renamed.vcf.gz"
+        mapping = renamefile if rename_tf else "/dev/null"
+    output: temp("data/by_chrom/{sample}_chr{chrom}_filtered_renamed.vcf.gz")
     shell:
         "{loads[bcftools]}; "
-        "{com[bcftools]} reheader --samples {input.mapping} -o {output} {input.vcf}"
+        "{com[bcftools]} reheader --samples {input.mapping} -o {output} -Oz {input.vcf}"
 
-if config['rename']:
-    renamed_cat = "data/by_chrom/{{sample}}_chr{chrom}_filtered_renamed.vcf.gz"
-    renamed = "data/by_chrom/{sample}_chr{chrom}_filtered_renamed.vcf.gz"
-    renamed_merge = "data/by_chrom/{sample}_chr{{chrom}}_filtered_renamed.vcf.gz"
-else:
-    renamed_cat = "data/by_chrom/{{sample}}_chr{chrom}_filtered.vcf.gz"
-    renamed = "data/by_chrom/{sample}_chr{chrom}_filtered.vcf.gz"
-    renamed_merge = "data/by_chrom/{sample}_chr{{chrom}}_filtered.vcf.gz"
+rule renameAuto:
+    input:
+        vcf = rules.filters.output,
+        mapping = automap if automap_tf else "/dev/null"
+    output:
+        fixed = temp("data/by_chrom/{sample}_chr{chrom}_filtered_fixedIDs.vcf.gz"),
+        mapping = "data/by_chrom/{sample}_chr{chrom}_vcfmap.tsv",
+        reheader = temp("data/by_chrom/{sample}_chr{chrom}_vcfreheader.txt")
+    shell:
+        "{loads[bcftools]}; {loads[R]}; "
+        "{com[R]} scripts/fix_HRCvcf.R {input.vcf} {input.mapping} {output.mapping} {output.reheader}; "
+        "{com[bcftools]} reheader --samples {output.reheader} {input.vcf} | "
+        "{com[bcftools]} view -o {output.fixed} -Oz"
 
 rule concat_chroms_samp:
     input: expand(renamed_cat, chrom=CHROM)
@@ -191,22 +252,24 @@ rule make_plink_all:
     input: rules.concat_chroms_all.output
     output: expand("data/all_chrall_filtered.{ext}", ext=BPLINK)
     params:
-        out_plink = "data/all_chrall_filtered"
+        out_plink = "data/all_chrall_filtered",
+        ID = "--id-delim" if automap_tf else "--double-id"
     threads: 10
     shell:
         "{loads[plink2]}; "
-        "{com[plink2]} --vcf {input} --memory 10000 --threads 10 --make-bed "
+        "{com[plink2]} --vcf {input} {params.ID} --memory 10000 --threads 10 --make-bed "
         "--out {params.out_plink}"
 
 rule make_plink_samp:
     input: rules.concat_chroms_samp.output
     output: expand("data/{{sample}}_chrall_filtered.{ext}", ext=BPLINK)
     params:
-        out_plink = "data/{sample}_chrall_filtered"
+        out_plink = "data/{sample}_chrall_filtered",
+        ID = "--id-delim" if automap_tf else "--double-id "
     threads: 10
     shell:
         "{loads[plink2]}; "
-        "{com[plink2]} --vcf {input} --memory 10000 --threads 10 --make-bed "
+        "{com[plink2]} --vcf {input} {params.ID} --memory 10000 --threads 10 --make-bed "
         "--out {params.out_plink}"
 
 rule make_bgen:
@@ -216,7 +279,8 @@ rule make_bgen:
         bgen = temp(tempdir + "{sample}_chr{chrom}_filtered.bgen"),
         samp = temp(tempdir + "{sample}_chr{chrom}.sample")
     shell:
-"""{loads[qctool]}
+        """
+{loads[qctool]}
 {com[qctool]} -g {input.gen} -vcf-genotype-field GP \
 -os {output.samp} -og {output.bgen}
 """

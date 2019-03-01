@@ -4,6 +4,7 @@ author: "Shea Andrews and Brian Fulton-Howard"
 output: html_document
 params:
    path: "ADGC_ACT1-2/"
+   outpath: "out/"
    chrom: "20:22"
    cohort: "ADGC: ACT 1-2"
    maf: 0.01 #cutoff between common and rare
@@ -18,7 +19,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse) ## data wrangling
 library(ggplot2)   ## plotting
 library(scales)    ## for using commas on ggplot scales
-library(feather)   ## for outputing data to .feather format
+# library(feather)   ## for outputing data to .feather format
 library(kableExtra)## displaing tables nicly in html
 library(stringr)   ## replace substring for file output
 library(magrittr)
@@ -137,7 +138,7 @@ dat.smallsamp <- datImput.smallsamp %>%
    arrange(CHR, POS)
 
 ## save dataframe to disk
-write_feather(dat.smallsamp, "df.feather")
+# write_feather(dat.smallsamp, "df.feather")
 ```
 
 ```{r data tabulation, echo=FALSE}
@@ -198,7 +199,7 @@ if ( no_rsq2 ) {
 
 ## save the table to disk
 cohort_file <- str_replace(params$cohort, " ", "_")
-write_csv(dat.out, paste0(params$path, 'SNPcount', cohort_file, '.csv'))
+write_csv(dat.out, paste0(params$outpath, 'SNPcount', cohort_file, '.csv'))
 ```
 
 ## Number of SNPs in datasets
