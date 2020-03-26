@@ -10,6 +10,7 @@ params:
    maf: 0.01 #cutoff between common and rare
    rsq: 0.3 #Rsq to use with common variants
    rsq2: NA #Rsq to use with rare variants (set to NA to use rsq as hard cutoff)
+   wrsq: NA
    sampsize: 100000 #number of SNPs of each type to sample for figures
    reading: "P" #P for parallel, L for looping (how to read files in)
 ---
@@ -145,17 +146,17 @@ dat.smallsamp <- datImput.smallsamp %>%
 ##---- Data Tabulation ----##
 ##  total number of imputed SNPs per chromosome
 dat.out <- dat %>%
-  mutate(cut.rsq.high = Rsq >= params$rsq & MAF >= params$maf) %>%
-  mutate(cut.typed = Genotyped == "Genotyped")
+  mutate(Pass_R2_Common = Rsq >= params$rsq & MAF >= params$maf) %>%
+  mutate(Pass_typed = Genotyped == "Genotyped")
 
 if ( no_rsq2 ) {
   dat.out %<>%
-    mutate(cut.maf = MAF >= params$maf) %>%
-    mutate(included = (cut.rsq.high & cut.maf) | cut.typed)
+    mutate(Pass_MAF = MAF >= params$maf) %>%
+    mutate(included = (Pass_R2_Common & Pass_MAF) | Pass_typed)
 } else {
   dat.out %<>%
-    mutate(cut.rsq.low = Rsq >= params$rsq2 & MAF < params$maf) %>%
-    mutate(included = cut.rsq.low | cut.rsq.high | cut.typed)
+    mutate(Pass_R2_Rare = Rsq >= params$rsq2 & MAF < params$maf) %>%
+    mutate(included = Pass_R2_Rare | Pass_R2_Common | Pass_typed)
 }
 
 tested.n <- dat.out %>%
@@ -167,34 +168,34 @@ tested.n <- dat.out %>%
 dat.out %<>%
   select(-EmpRsq, -maf.cat) %>%
   filter_all(all_vars(!is.na(.))) %>%
-  select(CHR, matches("cut.rsq.low|cut.maf"), cut.rsq.high, cut.typed, included) %>%
+  select(CHR, matches("Pass_R2_Rare|Pass_MAF"), Pass_R2_Common, Pass_typed, included) %>%
   group_by(CHR) %>%
-  summarise_all(funs(sum)) %>%
+  summarise_all(sum) %>%
   ungroup() %>%
   add_column(n = tested.n, .after = 1) %>%
   mutate(CHR = as.character(CHR))
 
 dat.out %<>%
-  bind_rows(summarise_all(select(dat.out, -CHR), funs(mean))) %>%
-  bind_rows(summarise_all(select(dat.out, -CHR), funs(sum)))
+  bind_rows(summarise_all(select(dat.out, -CHR), mean)) %>%
+  bind_rows(summarise_all(select(dat.out, -CHR), sum))
 dat.out[nrow(dat.out), "CHR"] <- "Total"
 dat.out[nrow(dat.out)-1, "CHR"] <- "Mean"
 
 dat.out %<>%
   mutate(n = prettyNum(n, big.mark=",", preserve.width="none")) %>%
-  mutate(cut.rsq.high = prettyNum(cut.rsq.high, big.mark=",", preserve.width="none")) %>%
-  mutate(cut.typed = prettyNum(cut.typed, big.mark=",", preserve.width="none")) %>%
+  mutate(Pass_R2_Common = prettyNum(Pass_R2_Common, big.mark=",", preserve.width="none")) %>%
+  mutate(Pass_typed = prettyNum(Pass_typed, big.mark=",", preserve.width="none")) %>%
   mutate(included = prettyNum(included, big.mark=",", preserve.width="none"))
 
 
 
 if ( no_rsq2 ) {
   dat.out %<>%
-    rename(cut.rsq = cut.rsq.high) %>%
-    mutate(cut.maf = prettyNum(cut.maf, big.mark=",", preserve.width="none"))
+    rename(Pass_R2 = Pass_R2_Common) %>%
+    mutate(Pass_MAF = prettyNum(Pass_MAF, big.mark=",", preserve.width="none"))
 } else {
   dat.out %<>%
-    mutate(cut.rsq.low = prettyNum(cut.rsq.low, big.mark=",", preserve.width="none"))
+    mutate(Pass_R2_Rare = prettyNum(Pass_R2_Rare, big.mark=",", preserve.width="none"))
 }
 
 ## save the table to disk
@@ -245,7 +246,7 @@ dat %>%
   summarise(n(), mean(Rsq, na.rm = T), sd(Rsq, na.rm = T)) %>%
   rename('MAF Category' = maf.cat, n = 'n()', 'mean rsq' = 'mean(Rsq, na.rm = T)', 'sd rsq' = 'sd(Rsq, na.rm = T)') %>%
   mutate(n = prettyNum(n, big.mark=",", preserve.width="none")) %>%
-  mutate_if(is.numeric, funs(round(., 2))) %>%
+  mutate_if(is.numeric, ~round(., 2)) %>%
   knitr::kable(format = 'html', align = 'lrcc', caption = 'Number of imputed per MAF bin and mean rsq') %>%
   kable_styling(full_width = F, position = "center")
 
@@ -316,7 +317,7 @@ Below is an interactive version of the same plot, with approximately %s Genotype
 ```{r ggploty, eval=ishtml, echo=FALSE, message=FALSE, warning=FALSE}
 library(plotly)
 fig <- plt %>% plot_ly(x = ~MAF, y = ~Quality, color = ~Type,
-  type="scatter", mode="markers", customdata = c(~SNP, ~Type),
+  type="scatter", mode="markers",
   marker = list(size = 3, opacity = 0.3),
   colors = c('red', 'black'), hoverinfo = "text+name",
   text = ~sprintf('MAF: %f\n%s: %f\nSNP: %s',
@@ -326,7 +327,7 @@ fig <- plt %>% plot_ly(x = ~MAF, y = ~Quality, color = ~Type,
          xaxis = list(type = "log", range = c(-5, -0.3), title = "Minor Allele Frequency (MAF)"),
          yaxis = list(range = c(0, 1), title = "Quality (R² for Imputed; Empirical R² for Typed)"),
          legend = list(orientation = 'h')) %>%
-  config(sendData = FALSE, displaylogo = FALSE, collaborate = FALSE,
+  config(sendData = FALSE, displaylogo = FALSE,
          modeBarButtonsToRemove = list("sendDataToCloud", "lasso2d", "toImage", "autoScale2d")) %>%
   toWebGL()
 

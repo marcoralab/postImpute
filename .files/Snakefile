@@ -15,14 +15,14 @@ shell.executable("/bin/bash")
 
 if isMinerva:
     shell.prefix("PATH=" + config["anaconda"] + ":$PATH; ")
-    tempdir = "/sc/orga/scratch/{}/temp/".format(getuser())
+    tempdir = "/sc/hydra/scratch/{}/temp/".format(getuser())
     com = {'plink': 'plink --keep-allele-order', 'plink2': 'plink2',
            'bcftools': 'bcftools', 'R': 'Rscript', 'R2': 'R',
            'cat-bgen': 'cat-bgen', 'qctool': 'qctool'}
-    loads = {'plink': 'module load plink/1.90',
+    loads = {'plink': 'module load plink/1.90b6.7',
              'plink2': 'module load plink2/dev.2oct',
-             'bcftools': 'module load bcftools/1.7',
-             'R': ('module load R/3.4.3 pandoc/2.1.3 udunits/2.2.26; ',
+             'bcftools': 'module load bcftools/1.9',
+             'R': ('module load R/3.5.3 pandoc/2.6 udunits/2.2.26; ',
                    'RSTUDIO_PANDOC=$(which pandoc)'),
              'qctool': 'module load qctool/v2', 'cat-bgen': 'module load bgen'}
 else:
@@ -111,6 +111,15 @@ rule stats:
 # Sample filtering rules
 
 file_in = INPATH + "{sample}/chr{chrom}.dose.vcf.gz"
+
+rule indexinitial:
+    input: INPATH + "{sample}/chr{chrom}.dose.vcf.gz"
+    output: INPATH + "{sample}/chr{chrom}.dose.vcf.gz.tbi"
+    shell:
+        """
+{loads[bcftools]}
+{com[bcftools]} index -t {input}
+"""
 
 rule fixheaders:
     input:
