@@ -7,12 +7,10 @@ library(tibble)
 library(stringr)
 library(magrittr)
 
-args <- commandArgs(TRUE)
-
-fname <- args[1]
-mapfile <- args[2]
-foutmap <- args[3]
-foutrehead <- args[4]
+fname <- snakemake@input[['vcf']]
+mapfile <- snakemake@input[['mapping']]
+foutmap <- snakemake@output[['mapping']]
+foutrehead <- snakemake@output[['rehader']]
 
 conv_sampline <- function (sampline) {
   sampline %>%
@@ -98,4 +96,3 @@ mapped %>%
   write_tsv(path = foutrehead, col_names = F)
 
 message("Finished mapping sample names")
-

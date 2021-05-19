@@ -24,7 +24,8 @@ def fix_path(path):
 def build_samp(in_path):
     p = os.path.abspath(in_path)
     p = [directory for directory,y,files in os.walk(p)
-            if any("info.gz" in f for f in files)]
+            # if any("info.gz" in f for f in files)]
+            if any(".zip" in f for f in files)]
     return [os.path.basename(x) for x in p]
 
 

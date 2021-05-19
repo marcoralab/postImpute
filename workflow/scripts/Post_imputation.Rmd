@@ -3,19 +3,22 @@ title: "Imputation Statistics"
 author: "Shea Andrews and Brian Fulton-Howard"
 output: html_document
 params:
-   path: "ADGC_ACT1-2/"
-   outpath: "out/"
-   chrom: "20:22"
-   cohort: "ADGC: ACT 1-2"
-   maf: 0.01 #cutoff between common and rare
-   rsq: 0.3 #Rsq to use with common variants
+   path: NA
+   outpath: NA
+   chrom: NA
+   cohort: NA
+   maf: NA #cutoff between common and rare
+   rsq: NA #Rsq to use with common variants
    rsq2: NA #Rsq to use with rare variants (set to NA to use rsq as hard cutoff)
    wrsq: NA
-   sampsize: 100000 #number of SNPs of each type to sample for figures
+   sampsize: NA #number of SNPs of each type to sample for figures
    reading: "P" #P for parallel, L for looping (how to read files in)
+   rwd: NA
 ---
 ```{r setup, include=FALSE, warning=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = params$rwd)
+
 ##---- Requried Pacakges ----##
 library(tidyverse) ## data wrangling
 library(ggplot2)   ## plotting
@@ -70,12 +73,12 @@ choose_files <- function(path, chrom) {
   }
   return(files_use)
 }
-
-myFiles <- choose_files(params$path, chr_parse(params$chrom))
 ```
 
 ```{r data, include=FALSE, warning=FALSE, message=FALSE}
 ##---- Data Wrangling ----##
+
+myFiles <- choose_files(params$path, chr_parse(params$chrom))
 
 ##  Read info files into R
 read_info <- function(f) {
@@ -108,7 +111,7 @@ if (params$reading == "P") {
 # create new varible with MAF bins
 mafbin.break <- c(-Inf, 0.0005, 0.001, 0.005, 0.01, 0.02, 0.05, Inf)
 mafbin.labs <- c('< 0.05%', '0.05% to 0.1%', '0.1% to 0.5%',
-                 '0.5% to 1%', '1% to 2%', '2% to 5%', '≥ 5%')
+                 '0.5% to 1%', '1% to 2%', '2% to 5%', '> 5%')
 dat %<>% mutate(maf.cat = cut(MAF, breaks = mafbin.break,
                               labels = mafbin.labs))
 
@@ -200,7 +203,7 @@ if ( no_rsq2 ) {
 
 ## save the table to disk
 cohort_file <- str_replace(params$cohort, " ", "_")
-write_csv(dat.out, paste0(params$outpath, 'SNPcount', cohort_file, '.csv'))
+write_csv(dat.out, paste0(params$outpath, '/SNPcount', cohort_file, '.csv'))
 ```
 
 ## Number of SNPs in datasets
@@ -306,7 +309,7 @@ ggplot() +
 ```
 
 
-```{R conditional_block_py, echo=FALSE, results='asis', eval=ishtml}
+```{R conditional_block_py, echo=FALSE, results='asis', eval=FALSE}
 cat(sprintf("## MAF vs. Quality Score (interactive)
 
 Below is an interactive version of the same plot, with approximately %s Genotyped SNPs and %s Imputed SNPs subsampled. You can zoom in and out, and you can mouse over individual variants for more information.
@@ -314,7 +317,7 @@ Below is an interactive version of the same plot, with approximately %s Genotype
 ", samp_pretty, samp_pretty))
 ```
 
-```{r ggploty, eval=ishtml, echo=FALSE, message=FALSE, warning=FALSE}
+```{r ggploty, eval=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
 library(plotly)
 fig <- plt %>% plot_ly(x = ~MAF, y = ~Quality, color = ~Type,
   type="scatter", mode="markers",

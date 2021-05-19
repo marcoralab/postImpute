@@ -1,0 +1,10 @@
+channels:
+    - bioconda
+    - conda-forge
+    - r
+dependencies:
+    - r-base=4.0.3
+    - r-essentials=4.0
+    - r-here=1.0.1
+    - r-ggtern=3.3.0
+    - bioconductor-genesis=2.20.1

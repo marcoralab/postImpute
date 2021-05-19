@@ -1,13 +1,43 @@
+# snakejob -j 100 --use-conda --keep-going --notemp -np
+# snakemake --forceall --rulegraph | dot -Tpdf > docs/dag.pdf
+
 # Directory where input imputed filesets are.
 # No trailing / is required.
-directory: .
+SAMPLES:
+  -
+    COHORT: "ADNI_1"
+    JOB:
+      id: "job-20210518-083345-127"
+      pwd: "5vZMb8lF\\|TdqSH"
+  -
+    COHORT: "ADNI_GO"
+    JOB:
+      id: "job-20210512-083718-986"
+      pwd: "qQCT2g95rRlqVo"
+  -
+    COHORT: "ADNI_2"
+    JOB:
+      id: "job-20210512-083700-297"
+      pwd: "Jrrm9PjqLGp5QM"
+  -
+    COHORT: "ADNI_3"
+    JOB:
+      id: "job-20210511-142854-619"
+      pwd: "iZv3KAgKmda8WF"
+  -
+    COHORT: "Omni25M"
+    JOB:
+      id: "job-20210511-135959-807"
+      pwd: "1cJ2cIMC\\$zNdwh"
+
+directory: HRC_impute/
 
 outputs: # Comment out any line with outputs you don't want
   - stat_report # A report of imputation quality
   - vcf_bycohort # Bgzipped VCF files for each cohort
   - vcf_merged # A bgzipped VCF with all cohorts
-#  - bgen_bycohort # Binary oxford filesets for each cohort
-#  - bgen_merged # A binary oxford fileset with all cohorts
+  # - bgen_bycohort # Binary oxford filesets for each cohort
+  # - bgen_merged # A binary oxford fileset with all cohorts
   - plink_bycohort # Binary plink filesets for each cohort
   - plink_merged # A binary plink fileset with all cohorts
 
@@ -20,9 +50,9 @@ chroms: "1:22"
 # QC Parameters for filtering and analysis
 qc:
   # MAF Cutoff between common and rare
-  maf: 0.01
+  maf: 0.005
   # Rsq to use with common variants
-  rsq: 0.8
+  rsq: 0.3
   # Rsq to use with rare variants (set to NA to use rsq as hard cutoff)
   rsq2: NA
   # Number of SNPs of each type (Imputed, Typed) to sample for figures
@@ -45,3 +75,4 @@ exclude_samp:
 rename:
 #  automap:
 
+anaconda:

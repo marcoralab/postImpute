@@ -1,0 +1,21 @@
+SAMPLES:
+  -
+    COHORT: "ADNI_GO"
+    JOB:
+      id: "job-20210512-083718-986"
+      pwd: "qQCT2g95rRlqVo"
+  -
+    COHORT: "ADNI_2"
+    JOB:
+      id: "job-20210512-083700-297"
+      pwd: "Jrrm9PjqLGp5QM"
+  -
+    COHORT: "ADNI_3"
+    JOB:
+      id: "job-20210511-142854-619"
+      pwd: "iZv3KAgKmda8WF"
+  -
+    COHORT: "Omni25M"
+    JOB:
+      id: "job-20210511-135959-807"
+      pwd: "1cJ2cIMC\\$zNdwh"

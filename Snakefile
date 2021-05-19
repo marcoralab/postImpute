@@ -1,39 +1,19 @@
 '''Snakefile for MIS post-imputation QC
    Version 0.1.1'''
-
-from scripts.parse_config import parser
+try:
+    from scripts.parse_config import parser
+except:
+    from workflow.scripts.parse_config import parser
 from getpass import getuser
 
+import pandas as pd
 import os
 import socket
 
-isMinerva = "hpc.mssm.edu" in socket.getfqdn()
 RWD = os.getcwd()
 
-configfile: "./config.yaml"
-shell.executable("/bin/bash")
-
-if isMinerva:
-    shell.prefix("PATH=" + config["anaconda"] + ":$PATH; ")
-    tempdir = "/sc/hydra/scratch/{}/temp/".format(getuser())
-    com = {'plink': 'plink --keep-allele-order', 'plink2': 'plink2',
-           'bcftools': 'bcftools', 'R': 'Rscript', 'R2': 'R',
-           'cat-bgen': 'cat-bgen', 'qctool': 'qctool'}
-    loads = {'plink': 'module load plink/1.90b6.7',
-             'plink2': 'module load plink2/dev.2oct',
-             'bcftools': 'module load bcftools/1.9',
-             'R': ('module load R/3.5.3 pandoc/2.6 udunits/2.2.26; ',
-                   'RSTUDIO_PANDOC=$(which pandoc)'),
-             'qctool': 'module load qctool/v2', 'cat-bgen': 'module load bgen'}
-else:
-    com = {'plink': 'plink --keep-allele-order', 'plink2': 'plink2',
-           'bcftools': 'bcftools', 'R': 'Rscript', 'R2': 'R',
-           'cat-bgen': 'cat-bgen', 'qctool': 'qctool'}
-    loads = {'plink': 'echo running plink', 'plink2': 'echo running plink',
-             'cat-bgen': 'echo using bgen lib',
-             'bcftools': 'echo running bcftools',  'R': 'echo running R',
-             'qctool': 'echo running qctool'}
-    tempdir = "/tmp/{}/postImpute/".format(getuser())
+configfile: "config/config.yaml"
+SAMPLES = pd.DataFrame.from_records(config["SAMPLES"], index = "COHORT")
 
 BPLINK = ["bed", "bim", "fam"]
 
@@ -84,11 +64,26 @@ outputs = flatten(outputs)
 rule all:
     input: outputs
 
-rule stats:
-    input: "scripts/Post_imputation.Rmd"
-    output: "stats/{sample}_impStats.html"
+
+rule unzip:
+    input: INPATH + "{sample}/chr_{chrom}.zip"
+    output:
+        vcf = "input/{sample}/chr{chrom}.dose.vcf.gz",
+        info = "input/{sample}/chr{chrom}.info.gz"
     params:
-        path = INPATH + "{sample}/",
+        pwd = lambda wildcards: SAMPLES.loc[wildcards.sample]['JOB']['pwd'],
+        dir = "input/{sample}/"
+    shell: "unzip -P {params.pwd} {input} -d {params.dir}"
+
+rule stats:
+    input:
+        markdown = "workflow/scripts/Post_imputation.Rmd",
+        info = expand("input/{sample}/chr{chrom}.info.gz", sample=SAMPLE, chrom=CHROM)
+    output:
+        outfile = "stats/{sample}_impStats.html"
+    params:
+        rwd = RWD,
+        path = "input/{sample}/",
         chrom = config["chroms"],
         cohort = "{sample}",
         maf = config["qc"]["maf"],
@@ -97,54 +92,41 @@ rule stats:
         sampsize = config["qc"]["sampsize"],
         out = "{sample}_impStats.html",
         output_dir = "stats"
-    shell:
-        """
-{loads[R]}
-{com[R2]} -e 'rmarkdown::render(\
-  "{input}", output_file = "{params.out}", \
-  output_dir = "{params.output_dir}", params = list(\
-  path = "{params.path}", outpath = "{params.output_dir}", \
-  cohort = "{params.cohort}", chrom = "{params.chrom}", \
-  maf = {params.maf}, rsq = {params.rsq}, rsq2 = {params.rsq2}))' --slave
-        """
+    conda: "workflow/envs/r.yaml"
+    script: "workflow/scripts/RenderPostImputationReport.R"
 
 # Sample filtering rules
 
-file_in = INPATH + "{sample}/chr{chrom}.dose.vcf.gz"
-
 rule indexinitial:
-    input: INPATH + "{sample}/chr{chrom}.dose.vcf.gz"
-    output: INPATH + "{sample}/chr{chrom}.dose.vcf.gz.tbi"
-    shell:
-        """
-{loads[bcftools]}
-{com[bcftools]} index -t {input}
-"""
+    input: rules.unzip.output.vcf
+    output: "input/{sample}/chr{chrom}.dose.vcf.gz.tbi"
+    conda: "workflow/envs/bcftools.yaml"
+    shell: "bcftools index -t {input}"
 
 rule fixheaders:
     input:
-        vcf = INPATH + "{sample}/chr{chrom}.dose.vcf.gz",
-        tbi = INPATH + "{sample}/chr{chrom}.dose.vcf.gz.tbi",
+        vcf = rules.unzip.output.vcf,
+        tbi = rules.indexinitial.output,
     output:
-        vcf = temp(tempdir + "fixedheader/{sample}/chr{chrom}.dose.vcf.gz"),
-        tbi = temp(tempdir + "fixedheader/{sample}/chr{chrom}.dose.vcf.gz.tbi"),
+        vcf = temp("temp/fixedheader/{sample}/chr{chrom}.dose.vcf.gz"),
+        tbi = temp("temp/fixedheader/{sample}/chr{chrom}.dose.vcf.gz.tbi"),
     threads: 1
+    conda: "workflow/envs/bcftools.yaml"
     shell:
         r"""
 if $(zcat {input} | head -n 40 | grep -q "##FILTER"); then
   cp {input.vcf} {output.vcf}
   cp {input.tbi} {output.tbi}
 else
-  {loads[bcftools]}
   zcat {input.vcf} | sed '/contig/ a\
 ##FILTER=<ID=GENOTYPED,Description="Marker was genotyped AND imputed">\
 ##FILTER=<ID=GENOTYPED_ONLY,Description="Marker was genotyped but NOT imputed">' | \
-{com[bcftools]} view -Oz -o {output.vcf}
-  {com[bcftools]} index -t {output.vcf}
+bcftools view -Oz -o {output.vcf}
+  bcftools index -t {output.vcf}
 fi
 """
 
-filter_annotate = (com["bcftools"] + " annotate -i \"%FILTER='GENOTYPED' || "
+filter_annotate = ("bcftools annotate -i \"%FILTER='GENOTYPED' || "
                    "{params.filt}\" -Oz -o {output} "
                    "--set-id '%CHROM:%POS:%REF:%ALT' --threads 8")
 filter_out = "data/by_chrom/{sample}_chr{chrom}_filtered.vcf.gz"
@@ -159,8 +141,8 @@ if sampfilt:
             filt = qualfilt,
             sf = sampfilt
         threads: 8
+        conda: "workflow/envs/bcftools.yaml"
         shell:
-            "{loads[bcftools]}; "
             "{params.sf} --force-samples -Oz --threads 8 {input.vcf} | "
             "" + filter_annotate
 
@@ -174,7 +156,8 @@ else:
             filt = qualfilt,
             sf = sampfilt
         threads: 8
-        shell: "{loads[bcftools]}; " + filter_annotate + " {input.vcf}"
+        conda: "workflow/envs/bcftools.yaml"
+        shell: filter_annotate + " {input.vcf}"
 
 # defaults for renaming:
 renamed_cat = "data/by_chrom/{{sample}}_chr{chrom}_filtered.vcf.gz"
@@ -206,38 +189,42 @@ rule rename:
         vcf = rules.filters.output,
         mapping = renamefile if rename_tf else "/dev/null"
     output: temp("data/by_chrom/{sample}_chr{chrom}_filtered_renamed.vcf.gz")
-    shell:
-        "{loads[bcftools]}; "
-        "{com[bcftools]} reheader --samples {input.mapping} -o {output} -Oz {input.vcf}"
+    conda: "workflow/envs/bcftools.yaml"
+    shell: "bcftools reheader --samples {input.mapping} -o {output} -Oz {input.vcf}"
 
-rule renameAuto:
+rule fixHeader:
     input:
         vcf = rules.filters.output,
         mapping = automap if automap_tf else "/dev/null"
     output:
-        fixed = temp("data/by_chrom/{sample}_chr{chrom}_filtered_fixedIDs.vcf.gz"),
         mapping = "data/by_chrom/{sample}_chr{chrom}_vcfmap.tsv",
         reheader = temp("data/by_chrom/{sample}_chr{chrom}_vcfreheader.txt")
+    conda: "workflow/envs/r.yaml"
+    script: "workflow/scripts/fix_HRCvcf.R"
+
+rule renameAuto:
+    input:
+        vcf = rules.filters.output,
+        header = rules.fixHeader.output.reheader
+    output:
+        fixed = temp("data/by_chrom/{sample}_chr{chrom}_filtered_fixedIDs.vcf.gz"),
+    conda: "workflow/envs/bcftools.yaml"
     shell:
-        "{loads[bcftools]}; {loads[R]}; "
-        "{com[R]} scripts/fix_HRCvcf.R {input.vcf} {input.mapping} {output.mapping} {output.reheader}; "
-        "{com[bcftools]} reheader --samples {output.reheader} {input.vcf} | "
-        "{com[bcftools]} view -o {output.fixed} -Oz"
+        "bcftools reheader --samples {output.reheader} {input.vcf} | "
+        "bcftools view -o {output.fixed} -Oz"
 
 rule concat_chroms_samp:
     input: expand(renamed_cat, chrom=CHROM)
     output: "data/{sample}_chrall_filtered.vcf.gz"
     threads: 8
-    shell:
-        "{loads[bcftools]}; "
-        "{com[bcftools]} concat -o {output} -Oz --threads 8 {input}"
+    conda: "workflow/envs/bcftools.yaml"
+    shell: "bcftools concat -o {output} -Oz --threads 8 {input}"
 
 rule index_samples_chrom:
     input: renamed
     output: renamed + ".tbi"
-    shell:
-        "{loads[bcftools]}; "
-        "{com[bcftools]} index -t {input}"
+    conda: "workflow/envs/bcftools.yaml"
+    shell: "bcftools index -t {input}"
 
 rule merge_samples_chrom:
     input:
@@ -245,17 +232,15 @@ rule merge_samples_chrom:
         tbi = expand(renamed_merge + ".tbi", sample=SAMPLE)
     output: "data/by_chrom/all_chr{chrom}_filtered.vcf.gz"
     threads: 8
-    shell:
-        "{loads[bcftools]}; "
-        "{com[bcftools]} merge -m none -o {output} -Oz --threads 8 {input.vcf}"
+    conda: "workflow/envs/bcftools.yaml"
+    shell: "bcftools merge -m none -o {output} -Oz --threads 8 {input.vcf}"
 
 rule concat_chroms_all:
     input: expand("data/by_chrom/all_chr{chrom}_filtered.vcf.gz", chrom=CHROM)
     output: "data/all_chrall_filtered.vcf.gz"
     threads: 8
-    shell:
-        "{loads[bcftools]}; "
-        "{com[bcftools]} concat -o {output} -Oz --threads 8 {input}"
+    conda: "workflow/envs/bcftools.yaml"
+    shell: "bcftools concat -o {output} -Oz --threads 8 {input}"
 
 rule make_plink_all:
     input: rules.concat_chroms_all.output
@@ -264,9 +249,9 @@ rule make_plink_all:
         out_plink = "data/all_chrall_filtered",
         ID = "--id-delim" if automap_tf else "--double-id"
     threads: 10
+    conda: "workflow/envs/plink.yaml"
     shell:
-        "{loads[plink2]}; "
-        "{com[plink2]} --vcf {input} {params.ID} --memory 10000 --threads 10 --make-bed "
+        "plink --keep-allele-order --vcf {input} {params.ID} --memory 10000 --threads 10 --make-bed "
         "--out {params.out_plink}"
 
 rule make_plink_samp:
@@ -276,65 +261,10 @@ rule make_plink_samp:
         out_plink = "data/{sample}_chrall_filtered",
         ID = "--id-delim" if automap_tf else "--double-id "
     threads: 10
+    conda: "workflow/envs/plink.yaml"
     shell:
-        "{loads[plink2]}; "
-        "{com[plink2]} --vcf {input} {params.ID} --memory 10000 --threads 10 --make-bed "
+        "plink --keep-allele-order --vcf {input} {params.ID} --memory 10000 --threads 10 --make-bed "
         "--out {params.out_plink}"
 
-rule make_bgen:
-    input:
-        gen = renamed
-    output:
-        bgen = temp(tempdir + "{sample}_chr{chrom}_filtered.bgen"),
-        samp = temp(tempdir + "{sample}_chr{chrom}.sample")
-    shell:
-        """
-{loads[qctool]}
-{com[qctool]} -g {input.gen} -vcf-genotype-field GP \
--os {output.samp} -og {output.bgen}
-"""
-
-rule cat_bgen_samp:
-    input:
-        gen = expand(tempdir + "{{sample}}_chr{chrom}_filtered.bgen", chrom=CHROM),
-        samp = expand(tempdir + "{{sample}}_chr{chrom}.sample", chrom=CHROM)[0]
-    output:
-        gen = "data/{sample}_chrall_filtered.bgen",
-        samp = "data/{sample}_chrall.sample"
-    shell:
-        """
-{loads[cat-bgen]}
-{com[cat-bgen]} -g {input.gen} -og {output.gen}
-cp {input.samp} {output.samp}"""
-
-bga_gen = expand(tempdir + "{sample}_chr{{chrom}}_filtered.bgen", sample=SAMPLE)
-bga_samp = expand(tempdir + "{sample}_chr{{chrom}}.sample", sample=SAMPLE)
-
-rule make_bgen_allsamp:
-    input:
-        gen = bga_gen,
-        samp = bga_samp
-    output:
-        bgen = "data/merged/merged_chr{chrom}_filtered.bgen",
-        samp = "data/merged/merged_chr{chrom}.sample"
-    params:
-        args = " ".join(["-g {} -s {}".format(gen, samp) for gen, samp in zip(bga_gen, bga_samp)])
-    threads: 10
-    shell:
-        """
-module load qctool/v2
-qctool {params.args} -og {output.bgen} -os {output.samp} -threads 10
-"""
-
-rule cat_bgen_allsamp:
-    input:
-        gen = expand("data/merged/merged_chr{chrom}_filtered.bgen", chrom=CHROM),
-        samp = expand("data/merged/merged_chr{chrom}.sample", chrom=CHROM)[0]
-    output:
-        gen = "data/merged/merged_chrall_filtered.bgen",
-        samp = "data/merged/merged_chrall.sample"
-    shell:
-        """
-{loads[cat-bgen]}
-{com[cat-bgen]} -g {input.gen} -og {output.gen}
-cp {input.samp} {output.samp}"""
+# If bgen outputs are requested
+include: "workflow/rules/bgen.smk"

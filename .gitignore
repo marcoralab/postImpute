@@ -1,0 +1,9 @@
+.snakejob/
+.snakemake/
+HRC_impute/
+data/
+docs/
+input/
+stats/
+samp.irem
+temp/

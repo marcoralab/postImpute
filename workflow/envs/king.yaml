@@ -1,0 +1,4 @@
+channels:
+    - bioconda
+dependencies:
+    - king=2.2.4
