@@ -71,9 +71,21 @@ rule unzip:
         vcf = "input/{sample}/chr{chrom}.dose.vcf.gz",
         info = "input/{sample}/chr{chrom}.info.gz"
     params:
-        pwd = lambda wildcards: SAMPLES.loc[wildcards.sample]['JOB']['pwd'],
-        dir = "input/{sample}/"
-    shell: "unzip -P {params.pwd} {input} -d {params.dir}"
+        passwd = lambda wildcards: SAMPLES.loc[wildcards.sample]['JOB']['pwd'],
+        odir = "input/{sample}"
+    conda: 'workflow/envs/p7z.yaml'
+    shell:
+        r'''
+7za e {input} -p{params.passwd} -o{params.odir}
+for FILE in chunks-excluded.txt snps-excluded.txt typed-only.txt chr_{{1..22}}.log; do
+  INFILE="{INPATH}{wildcards.sample}/$FILE"
+  OUTFILE="{params.odir}/$FILE"
+  if test -f "$INFILE"; then
+    echo copying $INFILE to $OUTFILE 
+    cp $INFILE $OUTFILE
+  fi
+done
+'''
 
 rule stats:
     input:

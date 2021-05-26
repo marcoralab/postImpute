@@ -1,0 +1,4 @@
+channels:
+  - conda-forge
+dependencies:
+  - p7zip=16.02
