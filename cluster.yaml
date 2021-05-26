@@ -6,15 +6,15 @@ __default__:
   mem: 2000
   time: '2:00'
 stats:
-  mem: 4000
-  partition: manda #bode and sometimes mothra segfault
-  time: '4:00'
+  mem: 6000
+  cores: 22
+  time: '8:00'
 filters: #preparation: #filters:
-  time: '5:00'
+  time: '24:00'
   mem: 128
 fixheaders:
   cores: 1
-  time: "5:00"
+  time: "24:00"
 vcf_merge:
   time: "36:00"
 rename:
@@ -32,7 +32,7 @@ concat_chroms_all:
   time: '24:00'
   mem: 256
 concat_chroms_samp:
-  time: '2:00'
+  time: '24:00'
   mem: 256
 make_bgen:
   time: "24:00"
