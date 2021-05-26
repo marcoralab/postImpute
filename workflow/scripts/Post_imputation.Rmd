@@ -84,7 +84,7 @@ myFiles <- choose_files(params$path, chr_parse(params$chrom))
 read_info <- function(f) {
   message(sprintf("Loading %s...", f))
   #Read MAF, Rsq, and EmpRsq as numeric, replacing '-' with NA
-  dat.raw <- read_tsv(f, col_types = 'cccnnnncnnncc', na = c("-"))
+  dat.raw <- vroom::vroom(f, col_types = 'cccnnnncnnncc', na = c("-"))
   dat <- dat.raw %>%
     #Seperate CHR:POS columns
     separate(SNP, c('CHR', 'POS'), sep = ":") %>%
@@ -98,7 +98,7 @@ read_info <- function(f) {
 
 myPathFiles <- paste0(params$path, myFiles)
 if (params$reading == "P") {
-  registerDoParallel(cores = 4)
+  registerDoParallel(cores = 11)
   dat <- foreach(i = myPathFiles, .combine = rbind) %dopar% read_info(i)
 } else {
   dat = list()
@@ -116,7 +116,8 @@ dat %<>% mutate(maf.cat = cut(MAF, breaks = mafbin.break,
                               labels = mafbin.labs))
 
 # Relevel CHR
-dat$CHR <- factor(dat$CHR, levels = c(1:22), labels = c(1:22))
+dat$CHR <- factor(str_replace(dat$CHR, "^chr", ""),
+                  levels = c(1:22), labels = c(1:22))
 
 ## calculate number of typed/imputed SNPs
 imputed.snps <- length(dat[dat$Genotyped == 'Imputed',]$SNP)
