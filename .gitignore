@@ -7,3 +7,5 @@ input/
 stats/
 samp.irem
 temp/
+__pycache__
+*.pyc
