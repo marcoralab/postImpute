@@ -7,4 +7,11 @@ dependencies:
     - r-essentials=4.0
     - r-here=1.0.1
     - r-ggtern=3.3.0
-    - bioconductor-genesis=2.20.1
+    - r-kableextra=1.3.4
+    - r-scales=1.1.1
+    - r-doparallel=1.0.16
+    - r-foreach=1.5.1
+    - r-knitr=1.33
+    - r-shiny=1.6.0
+    - r-plotly=4.9.3
+    - r-vroom=1.4.0
