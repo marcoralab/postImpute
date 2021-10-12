@@ -13,11 +13,18 @@ import socket
 RWD = os.getcwd()
 
 configfile: "config/config.yaml"
-SAMPLES = pd.DataFrame.from_records(config["SAMPLES"], index = "COHORT")
+if 'SAMPLES' in config:
+    zipped = True
+    SAMPLES = pd.DataFrame.from_records(config["SAMPLES"], index = "COHORT")
+else:
+    zipped = False
 
 BPLINK = ["bed", "bim", "fam"]
 
 CHROM, SAMPLE, INPATH, KEEP_COMMAND = parser(config)
+fixheaders = config['fixheaders'] if 'fixheaders' in config else True
+
+#import ipdb; ipdb.set_trace()
 
 def flatten(nested):
     flat = []
@@ -39,7 +46,7 @@ if config["qc"]["rsq2"] and config["qc"]["rsq2"] != 'NA':
 # remove subjects if sample filtering file is provided
 sampfilt = ""
 if config["exclude_samp"] or config["include_samp"]:
-    sampfilt += com["bcftools"] + " view --samples-file "
+    sampfilt += "bcftools view --samples-file "
     if config["exclude_samp"]:
         sampfilt += "^{}".format(config["exclude_samp"])
     if config["include_samp"]:
@@ -64,18 +71,18 @@ outputs = flatten(outputs)
 rule all:
     input: outputs
 
-
-rule unzip:
-    input: INPATH + "{sample}/chr_{chrom}.zip"
-    output:
-        vcf = "input/{sample}/chr{chrom}.dose.vcf.gz",
-        info = "input/{sample}/chr{chrom}.info.gz"
-    params:
-        passwd = lambda wildcards: SAMPLES.loc[wildcards.sample]['JOB']['pwd'],
-        odir = "input/{sample}"
-    conda: 'workflow/envs/p7z.yaml'
-    shell:
-        r'''
+if zipped:
+    rule unzip:
+        input: INPATH + "{sample}/chr_{chrom}.zip"
+        output:
+            vcf = "input/{sample}/chr{chrom}.dose.vcf.gz",
+            info = "input/{sample}/chr{chrom}.info.gz"
+        params:
+            passwd = lambda wildcards: SAMPLES.loc[wildcards.sample]['JOB']['pwd'],
+            odir = "input/{sample}"
+        conda: 'workflow/envs/p7z.yaml'
+        shell:
+            r'''
 7za e {input} -p{params.passwd} -o{params.odir}
 for FILE in chunks-excluded.txt snps-excluded.txt typed-only.txt chr_{{1..22}}.log; do
   INFILE="{INPATH}{wildcards.sample}/$FILE"
@@ -108,16 +115,17 @@ rule stats:
     script: "workflow/scripts/RenderPostImputationReport.R"
 
 # Sample filtering rules
+startfile =  rules.unzip.output.vcf if zipped else INPATH + "{sample}/chr{chrom}.dose.vcf.gz"
 
 rule indexinitial:
-    input: rules.unzip.output.vcf
-    output: "input/{sample}/chr{chrom}.dose.vcf.gz.tbi"
+    input: startfile
+    output: startfile + ".tbi"
     conda: "workflow/envs/bcftools.yaml"
     shell: "bcftools index -t {input}"
 
 rule fixheaders:
     input:
-        vcf = rules.unzip.output.vcf,
+        vcf = startfile,
         tbi = rules.indexinitial.output,
     output:
         vcf = temp("temp/fixedheader/{sample}/chr{chrom}.dose.vcf.gz"),
@@ -126,7 +134,7 @@ rule fixheaders:
     conda: "workflow/envs/bcftools.yaml"
     shell:
         r"""
-if $(zcat {input} | head -n 40 | grep -q "##FILTER"); then
+if $(zcat {input} | head -n 4000 | grep -q -e "##FILTER" -e "##INFO=<ID=IMPUTED"); then
   cp {input.vcf} {output.vcf}
   cp {input.tbi} {output.tbi}
 else
@@ -138,16 +146,14 @@ bcftools view -Oz -o {output.vcf}
 fi
 """
 
-filter_annotate = ("bcftools annotate -i \"%FILTER='GENOTYPED' || "
-                   "{params.filt}\" -Oz -o {output} "
-                   "--set-id '%CHROM:%POS:%REF:%ALT' --threads 8")
 filter_out = "data/by_chrom/{sample}_chr{chrom}_filtered.vcf.gz"
+
 
 if sampfilt:
     rule filters:
         input:
-            vcf = rules.fixheaders.output.vcf,
-            tbi = rules.fixheaders.output.tbi
+            vcf = rules.fixheaders.output.vcf if fixheaders else startfile,
+            tbi = rules.fixheaders.output.tbi if fixheaders else startfile + '.tbi'
         output: temp(filter_out)
         params:
             filt = qualfilt,
@@ -155,21 +161,34 @@ if sampfilt:
         threads: 8
         conda: "workflow/envs/bcftools.yaml"
         shell:
-            "{params.sf} --force-samples -Oz --threads 8 {input.vcf} | "
-            "" + filter_annotate
+            r'''
+if zcat {input.vcf} | head -n 4000 | grep -q "##INFO=<ID=IMPUTED"; then
+  {params.sf} --force-samples -Oz --threads 8 {input.vcf} | \
+  bcftools annotate -i "INFO/TYPED=1 || INFO/TYPED_ONLY=1 || {params.filt}" -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8
+else
+  {params.sf} --force-samples -Oz --threads 8 {input.vcf} | \
+  bcftools annotate -i "%FILTER='GENOTYPED' || %FILTER='GENOTYPED_ONLY' || {params.filt}" -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8
+fi'''
 
 else:
     rule filters:
         input:
-            vcf = rules.fixheaders.output.vcf,
-            tbi = rules.fixheaders.output.tbi
+            vcf = rules.fixheaders.output.vcf if fixheaders else startfile,
+            tbi = rules.fixheaders.output.tbi if fixheaders else startfile + '.tbi'
         output: temp(filter_out)
         params:
-            filt = qualfilt,
-            sf = sampfilt
+            filt = qualfilt
         threads: 8
         conda: "workflow/envs/bcftools.yaml"
-        shell: filter_annotate + " {input.vcf}"
+        shell:
+            r'''
+if zcat {input.vcf} | head -n 4000 | grep -q "##INFO=<ID=IMPUTED"; then
+  echo "Processing Minimac4 file"
+  bcftools annotate -i "INFO/TYPED=1 || INFO/TYPED_ONLY=1 || {params.filt}" -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8 {input.vcf}
+else
+  echo "Processing Minimac3 file"
+  bcftools annotate -i "%FILTER='GENOTYPED' || %FILTER='GENOTYPED_ONLY' || {params.filt}" -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8 {input.vcf}
+fi'''
 
 # defaults for renaming:
 renamed_cat = "data/by_chrom/{{sample}}_chr{chrom}_filtered.vcf.gz"
