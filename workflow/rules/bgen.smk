@@ -3,8 +3,8 @@ rule make_bgen:
     input:
         gen = renamed
     output:
-        bgen = temp("temp/{sample}_chr{chrom}_filtered.bgen"),
-        samp = temp("temp/{sample}_chr{chrom}.sample")
+        bgen = temp("temp/{cohort}_chr{chrom}_filtered.bgen"),
+        samp = temp("temp/{cohort}_chr{chrom}.sample")
     shell:
         """
 module load qctool/v2
@@ -14,18 +14,18 @@ qctool -g {input.gen} -vcf-genotype-field GP \
 
 rule cat_bgen_samp:
     input:
-        gen = expand("temp/{{sample}}_chr{chrom}_filtered.bgen", chrom=CHROM),
-        samp = expand("temp/{{sample}}_chr{chrom}.sample", chrom=CHROM)[0]
+        gen = expand("temp/{{cohort}}_chr{chrom}_filtered.bgen", chrom=CHROM),
+        samp = expand("temp/{{cohort}}_chr{chrom}.sample", chrom=CHROM)[0]
     output:
-        gen = "data/{sample}_chrall_filtered.bgen",
-        samp = "data/{sample}_chrall.sample"
+        gen = "data/{cohort}_chrall_filtered.bgen",
+        samp = "data/{cohort}_chrall.sample"
     shell:
         """
 cat-bgen -g {input.gen} -og {output.gen}
 cp {input.samp} {output.samp}"""
 
-bga_gen = expand("temp/{sample}_chr{{chrom}}_filtered.bgen", sample=SAMPLE)
-bga_samp = expand("temp/{sample}_chr{{chrom}}.sample", sample=SAMPLE)
+bga_gen = expand("temp/{cohort}_chr{{chrom}}_filtered.bgen", cohort=COHORT)
+bga_samp = expand("temp/{cohort}_chr{{chrom}}.sample", cohort=COHORT)
 
 rule make_bgen_allsamp:
     input:

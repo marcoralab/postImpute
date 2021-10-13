@@ -1,9 +1,9 @@
 '''Snakefile for MIS post-imputation QC
    Version 0.1.1'''
 try:
-    from scripts.parse_config import parser
+    from scripts.parse_config import parser_postImpute
 except:
-    from workflow.scripts.parse_config import parser
+    from workflow.scripts.parse_config import parser_postImpute
 from getpass import getuser
 
 import pandas as pd
@@ -12,12 +12,17 @@ import socket
 
 RWD = os.getcwd()
 
+# import ipdb; ipdb.set_trace()
+
 configfile: "config/config.yaml"
-SAMPLES = pd.DataFrame.from_records(config["SAMPLES"], index = "COHORT")
+S2 = [{'COHORT': x, 'JOB': y} for x, y in config['SAMPLES'].items()]
+SAMPLES = pd.DataFrame.from_records(S2, index = "COHORT")
+
+# if 'as_module' not in config or config['as_module'] is False:
+CHROM, COHORT, INPATH, KEEP_COMMAND = parser_postImpute(config)
 
 BPLINK = ["bed", "bim", "fam"]
 
-CHROM, SAMPLE, INPATH, KEEP_COMMAND = parser(config)
 
 def flatten(nested):
     flat = []
@@ -45,16 +50,16 @@ if config["exclude_samp"] or config["include_samp"]:
     if config["include_samp"]:
         sampfilt += "{}".format(config["include_samp"])
 
-plink_bycohort = "data/{sample}_chrall_filtered.{ext}"
+plink_bycohort = "data/{cohort}_chrall_filtered.{ext}"
 plink_merged = "data/all_chrall_filtered.{ext}"
 
 outs = dict(
-    stat_report=expand("stats/{sample}_impStats.html", sample=SAMPLE),
-    vcf_bycohort=expand("data/{sample}_chrall_filtered.vcf.gz", sample=SAMPLE),
+    stat_report=expand("stats/{cohort}_impStats.html", cohort=COHORT),
+    vcf_bycohort=expand("data/{cohort}_chrall_filtered.vcf.gz", cohort=COHORT),
     vcf_merged="data/all_chrall_filtered.vcf.gz",
-    bgen_bycohort=expand("data/{sample}_chrall_filtered.bgen", sample=SAMPLE),
+    bgen_bycohort=expand("data/{cohort}_chrall_filtered.bgen", cohort=COHORT),
     bgen_merged="data/merged/merged_chrall_filtered.bgen",
-    plink_bycohort=expand(plink_bycohort, sample=SAMPLE, ext=BPLINK),
+    plink_bycohort=expand(plink_bycohort, cohort=COHORT, ext=BPLINK),
     plink_merged=expand(plink_merged, ext=BPLINK)
             )
 
@@ -64,45 +69,47 @@ outputs = flatten(outputs)
 rule all:
     input: outputs
 
-
 rule unzip:
-    input: INPATH + "{sample}/chr_{chrom}.zip"
+    input:
+        zip = INPATH + "{cohort}/chr_{chrom}.zip"
     output:
-        vcf = "input/{sample}/chr{chrom}.dose.vcf.gz",
-        info = "input/{sample}/chr{chrom}.info.gz"
+        vcf = "input/{cohort}/chr{chrom}.dose.vcf.gz",
+        info = "input/{cohort}/chr{chrom}.info.gz"
     params:
-        passwd = lambda wildcards: SAMPLES.loc[wildcards.sample]['JOB']['pwd'],
-        odir = "input/{sample}"
+        passwd = lambda wildcards: SAMPLES.loc[wildcards.cohort]['JOB']['pwd'],
+        odir = "input/{cohort}",
+        # in_path = INPATH
     conda: 'workflow/envs/p7z.yaml'
     shell:
         r'''
-7za e {input} -p{params.passwd} -o{params.odir}
-for FILE in chunks-excluded.txt snps-excluded.txt typed-only.txt chr_{{1..22}}.log; do
-  INFILE="{INPATH}{wildcards.sample}/$FILE"
-  OUTFILE="{params.odir}/$FILE"
-  if test -f "$INFILE"; then
-    echo copying $INFILE to $OUTFILE 
-    cp $INFILE $OUTFILE
-  fi
-done
-'''
+        7za e {input} -p'{params.passwd}' -o{params.odir}
+        '''
+        # for FILE in chunks-excluded.txt snps-excluded.txt typed-only.txt chr_{{1..22}}.log; do
+        #   INFILE="{params.in_path}{wildcards.cohort}/$FILE"
+        #   OUTFILE="{params.odir}/$FILE"
+        #   if test -f "$INFILE"; then
+        #     echo copying $INFILE to $OUTFILE
+        #     cp $INFILE $OUTFILE
+        #   fi
+        # done
+        # '''
 
 rule stats:
     input:
         markdown = "workflow/scripts/Post_imputation.Rmd",
-        info = expand("input/{sample}/chr{chrom}.info.gz", sample=SAMPLE, chrom=CHROM)
+        info = expand("input/{cohort}/chr{chrom}.info.gz", cohort=COHORT, chrom=CHROM)
     output:
-        outfile = "stats/{sample}_impStats.html"
+        outfile = "stats/{cohort}_impStats.html"
     params:
         rwd = RWD,
-        path = "input/{sample}/",
+        path = "input/{cohort}/",
         chrom = config["chroms"],
-        cohort = "{sample}",
+        cohort = "{cohort}",
         maf = config["qc"]["maf"],
         rsq = config["qc"]["rsq"],
         rsq2 = config["qc"]["rsq2"],
         sampsize = config["qc"]["sampsize"],
-        out = "{sample}_impStats.html",
+        out = "{cohort}_impStats.html",
         output_dir = "stats"
     conda: "workflow/envs/r.yaml"
     script: "workflow/scripts/RenderPostImputationReport.R"
@@ -111,7 +118,7 @@ rule stats:
 
 rule indexinitial:
     input: rules.unzip.output.vcf
-    output: "input/{sample}/chr{chrom}.dose.vcf.gz.tbi"
+    output: "input/{cohort}/chr{chrom}.dose.vcf.gz.tbi"
     conda: "workflow/envs/bcftools.yaml"
     shell: "bcftools index -t {input}"
 
@@ -120,8 +127,8 @@ rule fixheaders:
         vcf = rules.unzip.output.vcf,
         tbi = rules.indexinitial.output,
     output:
-        vcf = temp("temp/fixedheader/{sample}/chr{chrom}.dose.vcf.gz"),
-        tbi = temp("temp/fixedheader/{sample}/chr{chrom}.dose.vcf.gz.tbi"),
+        vcf = temp("temp/fixedheader/{cohort}/chr{chrom}.dose.vcf.gz"),
+        tbi = temp("temp/fixedheader/{cohort}/chr{chrom}.dose.vcf.gz.tbi"),
     threads: 1
     conda: "workflow/envs/bcftools.yaml"
     shell:
@@ -141,7 +148,7 @@ fi
 filter_annotate = ("bcftools annotate -i \"%FILTER='GENOTYPED' || "
                    "{params.filt}\" -Oz -o {output} "
                    "--set-id '%CHROM:%POS:%REF:%ALT' --threads 8")
-filter_out = "data/by_chrom/{sample}_chr{chrom}_filtered.vcf.gz"
+filter_out = "data/by_chrom/{cohort}_chr{chrom}_filtered.vcf.gz"
 
 if sampfilt:
     rule filters:
@@ -172,9 +179,9 @@ else:
         shell: filter_annotate + " {input.vcf}"
 
 # defaults for renaming:
-renamed_cat = "data/by_chrom/{{sample}}_chr{chrom}_filtered.vcf.gz"
-renamed = "data/by_chrom/{sample}_chr{chrom}_filtered.vcf.gz"
-renamed_merge = "data/by_chrom/{sample}_chr{{chrom}}_filtered.vcf.gz"
+renamed_cat = "data/by_chrom/{{cohort}}_chr{chrom}_filtered.vcf.gz"
+renamed = "data/by_chrom/{cohort}_chr{chrom}_filtered.vcf.gz"
+renamed_merge = "data/by_chrom/{cohort}_chr{{chrom}}_filtered.vcf.gz"
 automap_tf = False
 rename_tf = False
 
@@ -186,21 +193,21 @@ if 'rename' in config:
         print("Automatically renaming samples.")
         automap_tf = True
         automap = config['rename']['automap']
-        renamed_cat = "data/by_chrom/{{sample}}_chr{chrom}_filtered_fixedIDs.vcf.gz"
-        renamed = "data/by_chrom/{sample}_chr{chrom}_filtered_fixedIDs.vcf.gz"
-        renamed_merge = "data/by_chrom/{sample}_chr{{chrom}}_filtered_fixedIDs.vcf.gz"
+        renamed_cat = "data/by_chrom/{{cohort}}_chr{chrom}_filtered_fixedIDs.vcf.gz"
+        renamed = "data/by_chrom/{cohort}_chr{chrom}_filtered_fixedIDs.vcf.gz"
+        renamed_merge = "data/by_chrom/{cohort}_chr{{chrom}}_filtered_fixedIDs.vcf.gz"
     elif config['rename'] and not type(config['rename']) is dict:
         print("Manualy renameing samples")
         renamefile = config['rename']
-        renamed_cat = "data/by_chrom/{{sample}}_chr{chrom}_filtered_renamed.vcf.gz"
-        renamed = "data/by_chrom/{sample}_chr{chrom}_filtered_renamed.vcf.gz"
-        renamed_merge = "data/by_chrom/{sample}_chr{{chrom}}_filtered_renamed.vcf.gz"
+        renamed_cat = "data/by_chrom/{{cohort}}_chr{chrom}_filtered_renamed.vcf.gz"
+        renamed = "data/by_chrom/{cohort}_chr{chrom}_filtered_renamed.vcf.gz"
+        renamed_merge = "data/by_chrom/{cohort}_chr{{chrom}}_filtered_renamed.vcf.gz"
 
 rule rename:
     input:
         vcf = rules.filters.output,
         mapping = renamefile if rename_tf else "/dev/null"
-    output: temp("data/by_chrom/{sample}_chr{chrom}_filtered_renamed.vcf.gz")
+    output: temp("data/by_chrom/{cohort}_chr{chrom}_filtered_renamed.vcf.gz")
     conda: "workflow/envs/bcftools.yaml"
     shell: "bcftools reheader --samples {input.mapping} -o {output} -Oz {input.vcf}"
 
@@ -209,8 +216,8 @@ rule fixHeader:
         vcf = rules.filters.output,
         mapping = automap if automap_tf else "/dev/null"
     output:
-        mapping = "data/by_chrom/{sample}_chr{chrom}_vcfmap.tsv",
-        reheader = temp("data/by_chrom/{sample}_chr{chrom}_vcfreheader.txt")
+        mapping = "data/by_chrom/{cohort}_chr{chrom}_vcfmap.tsv",
+        reheader = temp("data/by_chrom/{cohort}_chr{chrom}_vcfreheader.txt")
     conda: "workflow/envs/r.yaml"
     script: "workflow/scripts/fix_HRCvcf.R"
 
@@ -219,7 +226,7 @@ rule renameAuto:
         vcf = rules.filters.output,
         header = rules.fixHeader.output.reheader
     output:
-        fixed = temp("data/by_chrom/{sample}_chr{chrom}_filtered_fixedIDs.vcf.gz"),
+        fixed = temp("data/by_chrom/{cohort}_chr{chrom}_filtered_fixedIDs.vcf.gz"),
     conda: "workflow/envs/bcftools.yaml"
     shell:
         "bcftools reheader --samples {output.reheader} {input.vcf} | "
@@ -227,7 +234,7 @@ rule renameAuto:
 
 rule concat_chroms_samp:
     input: expand(renamed_cat, chrom=CHROM)
-    output: "data/{sample}_chrall_filtered.vcf.gz"
+    output: "data/{cohort}_chrall_filtered.vcf.gz"
     threads: 8
     conda: "workflow/envs/bcftools.yaml"
     shell: "bcftools concat -o {output} -Oz --threads 8 {input}"
@@ -240,8 +247,8 @@ rule index_samples_chrom:
 
 rule merge_samples_chrom:
     input:
-        vcf = expand(renamed_merge, sample=SAMPLE),
-        tbi = expand(renamed_merge + ".tbi", sample=SAMPLE)
+        vcf = expand(renamed_merge, cohort=COHORT),
+        tbi = expand(renamed_merge + ".tbi", cohort=COHORT)
     output: "data/by_chrom/all_chr{chrom}_filtered.vcf.gz"
     threads: 8
     conda: "workflow/envs/bcftools.yaml"
@@ -268,9 +275,9 @@ rule make_plink_all:
 
 rule make_plink_samp:
     input: rules.concat_chroms_samp.output
-    output: expand("data/{{sample}}_chrall_filtered.{ext}", ext=BPLINK)
+    output: expand("data/{{cohort}}_chrall_filtered.{ext}", ext=BPLINK)
     params:
-        out_plink = "data/{sample}_chrall_filtered",
+        out_plink = "data/{cohort}_chrall_filtered",
         ID = "--id-delim" if automap_tf else "--double-id "
     threads: 10
     conda: "workflow/envs/plink.yaml"

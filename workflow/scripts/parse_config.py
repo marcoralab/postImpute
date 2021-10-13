@@ -29,13 +29,13 @@ def build_samp(in_path):
     return [os.path.basename(x) for x in p]
 
 
-def parser(config):
+def parser_postImpute(config):
     # Construct chromosome list
     chrom = parse_chrom(config["chroms"])
 
     # Figure out samples
     in_path = fix_path(config["directory"])
-    sample = build_samp(in_path)
+    cohort = build_samp(in_path)
 
     # Make copy file with exclusions, else make empty one
     if "exclude_samp" in config:
@@ -57,4 +57,4 @@ def parser(config):
     if ("include_samp" not in config) or (not keep):
         keep_command = ""
 
-    return chrom, sample, in_path, keep_command
+    return chrom, cohort, in_path, keep_command
