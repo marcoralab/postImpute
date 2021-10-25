@@ -2,22 +2,22 @@
 title: "Imputation Statistics"
 author: "Shea Andrews and Brian Fulton-Howard"
 output: html_document
-params:
-   path: NA
-   outpath: NA
-   chrom: NA
-   cohort: NA
-   maf: NA #cutoff between common and rare
-   rsq: NA #Rsq to use with common variants
-   rsq2: NA #Rsq to use with rare variants (set to NA to use rsq as hard cutoff)
-   wrsq: NA
-   sampsize: NA #number of SNPs of each type to sample for figures
-   reading: "P" #P for parallel, L for looping (how to read files in)
-   rwd: NA
+# params:
+#    path: NA
+#    outpath: NA
+#    chrom: NA
+#    cohort: NA
+#    maf: NA #cutoff between common and rare
+#    rsq: NA #Rsq to use with common variants
+#    rsq2: NA #Rsq to use with rare variants (set to NA to use rsq as hard cutoff)
+#    wrsq: NA
+#    sampsize: NA #number of SNPs of each type to sample for figures
+#    reading: "P" #P for parallel, L for looping (how to read files in)
+#    rwd: NA
 ---
 ```{r setup, include=FALSE, warning=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_knit$set(root.dir = params$rwd)
+knitr::opts_knit$set(root.dir = snakemake@params[['rwd']])
 
 ##---- Requried Pacakges ----##
 library(tidyverse) ## data wrangling
@@ -30,17 +30,17 @@ library(magrittr)
 library(doParallel)
 library(foreach)
 
-no_rsq2 = is.na(params$rsq2) || params$rsq2 == "NA"
+no_rsq2 = is.na(snakemake@params[["rsq2"]]) || snakemake@params[["rsq2"]] == "NA"
 
 if (!no_rsq2) {
-  rsqs <- c(params$rsq, params$rsq2)
+  rsqs <- c(snakemake@params[["rsq"]], snakemake@params[["rsq2"]])
 } else {
-  rsqs <- params$rsq
+  rsqs <- snakemake@params[["rsq"]]
 }
 
 ishtml <- knitr::opts_knit$get("rmarkdown.pandoc.to") == "html"
 
-samp_pretty <- prettyNum(params$sampsize, big.mark=",", preserve.width="none")
+samp_pretty <- prettyNum(snakemake@params[["sampsize"]], big.mark=",", preserve.width="none")
 
 ## Parse the chromosome list
 
@@ -78,7 +78,7 @@ choose_files <- function(path, chrom) {
 ```{r data, include=FALSE, warning=FALSE, message=FALSE}
 ##---- Data Wrangling ----##
 
-myFiles <- choose_files(params$path, chr_parse(params$chrom))
+myFiles <- choose_files(snakemake@params[["path"]], chr_parse(snakemake@params[["chrom"]]))
 
 ##  Read info files into R
 read_info <- function(f) {
@@ -96,8 +96,8 @@ read_info <- function(f) {
     select(SNP, CHR, POS, MAF, Rsq, EmpRsq, Genotyped)
 }
 
-myPathFiles <- paste0(params$path, myFiles)
-if (params$reading == "P") {
+myPathFiles <- paste0(snakemake@params[["path"]], myFiles)
+if (snakemake@params[["reading"]] == "P") {
   registerDoParallel(cores = 11)
   dat <- foreach(i = myPathFiles, .combine = rbind) %dopar% read_info(i)
 } else {
@@ -125,7 +125,7 @@ typed.snps <- length(dat[dat$Genotyped == 'Genotyped',]$SNP)
 
 ##  Subsample either the set number of imputed and genotyped SNPs
 ##    OR if less then the set number of SNPs avalibe, all SNPs
-sampsize = params$sampsize
+sampsize = snakemake@params[["sampsize"]]
 datImput.smallsamp <- dat %>%
   filter(Genotyped == 'Imputed') %>%
   group_by(CHR) %>%
@@ -150,16 +150,16 @@ dat.smallsamp <- datImput.smallsamp %>%
 ##---- Data Tabulation ----##
 ##  total number of imputed SNPs per chromosome
 dat.out <- dat %>%
-  mutate(Pass_R2_Common = Rsq >= params$rsq & MAF >= params$maf) %>%
+  mutate(Pass_R2_Common = Rsq >= snakemake@params[["rsq"]] & MAF >= snakemake@params[["maf"]]) %>%
   mutate(Pass_typed = Genotyped == "Genotyped")
 
 if ( no_rsq2 ) {
   dat.out %<>%
-    mutate(Pass_MAF = MAF >= params$maf) %>%
+    mutate(Pass_MAF = MAF >= snakemake@params[["maf"]]) %>%
     mutate(included = (Pass_R2_Common & Pass_MAF) | Pass_typed)
 } else {
   dat.out %<>%
-    mutate(Pass_R2_Rare = Rsq >= params$rsq2 & MAF < params$maf) %>%
+    mutate(Pass_R2_Rare = Rsq >= snakemake@params[["rsq2"]] & MAF < snakemake@params[["maf"]]) %>%
     mutate(included = Pass_R2_Rare | Pass_R2_Common | Pass_typed)
 }
 
@@ -203,8 +203,8 @@ if ( no_rsq2 ) {
 }
 
 ## save the table to disk
-cohort_file <- str_replace(params$cohort, " ", "_")
-write_csv(dat.out, paste0(params$outpath, '/SNPcount', cohort_file, '.csv'))
+cohort_file <- str_replace(snakemake@params[["cohort"]], " ", "_")
+write_csv(dat.out, paste0(snakemake@params[["output_dir"]], '/SNPcount', cohort_file, '.csv'))
 ```
 
 ## Number of SNPs in datasets
@@ -226,7 +226,7 @@ The following histogram is of imputation quality scores ($\hat{r}^2$) for all ch
 ggplot(data = dat, aes(x = Rsq, fill = CHR)) + geom_histogram(binwidth = 0.01) +
   scale_x_continuous(expand = c(0,0)) + scale_y_continuous(labels = comma, expand=c(0,0)) +
   geom_vline(xintercept = rsqs, colour = 'red', linetype = 2) + theme_bw() +
-  labs(title = paste0(params$cohort, ': Distribution of imputation quality scores'), x = bquote('Quality ('~R^2~')'))
+  labs(title = paste0(snakemake@params[["cohort"]], ': Distribution of imputation quality scores'), x = bquote('Quality ('~R^2~')'))
 ```
 
 ## Imputation quality in MAF ranges.
@@ -239,7 +239,7 @@ ggplot(dat, aes(x = maf.cat, y = Rsq, fill = maf.cat)) + theme_bw() +
   geom_violin(alpha = 0.75, scale = 'width', draw_quantiles = 1) +
   geom_boxplot(width = 0.1, fill = 'white', outlier.size = 0.1) +
   scale_fill_brewer(palette = 'Set1') + theme(legend.position = 'none') +
-  labs(title = paste0(params$cohort, ': Distribution of Quality score by MAF '),
+  labs(title = paste0(snakemake@params[["cohort"]], ': Distribution of Quality score by MAF '),
   x = 'MAF',
   y = bquote('Quality ('~R^2~')'))
 ```
@@ -267,7 +267,7 @@ The following scatter-plots show imputation quality scores ($\hat{r}^2$), plotte
   scale_x_continuous(expand = c(0,0)) + scale_y_continuous(expand=c(0,0)) +
   facet_wrap(~CHR, scales = "free") +
   theme_classic() + theme(axis.text.x=element_blank(), axis.ticks.x=element_blank()) +
-  labs(title = paste0(params$cohort, ': Quality score by genomic position'),
+  labs(title = paste0(snakemake@params[["cohort"]], ': Quality score by genomic position'),
   x = 'Genomic Position',
   y = bquote('Quality ('~R^2~')'))
 ```
@@ -302,9 +302,9 @@ ggplot() +
   scale_x_log10(breaks = scales::trans_breaks("log10", function(x) 10^x),
    labels = scales::trans_format("log10", scales::math_format(10^.x)), limits = c(0.00001, 0.5), expand=c(0,0)) +
   scale_y_continuous(sec.axis = sec_axis(~ . +0, name = bquote('Concordance (Emperical '~R^2~')')), limits = c(0, 1), expand=c(0,0)) +
-  geom_vline(xintercept = params$maf, colour = 'blue', linetype = 2) +
+  geom_vline(xintercept = snakemake@params[["maf"]], colour = 'blue', linetype = 2) +
   geom_hline(yintercept = rsqs, colour = 'red', linetype = 2) +
-  theme_bw() + labs(title = paste0(params$cohort, ': Quality score by MAF'), y = bquote('Quality ('~R^2~')')) +
+  theme_bw() + labs(title = paste0(snakemake@params[["cohort"]], ': Quality score by MAF'), y = bquote('Quality ('~R^2~')')) +
   scale_colour_manual(name = 'SNPs', values = c('Imputed'='black','Genotyped'='red'), guide = 'legend') +
   guides(colour = guide_legend(override.aes = list(size = 1))) + theme(legend.position = 'bottom') + annotation_logticks()
 ```
@@ -327,7 +327,7 @@ fig <- plt %>% plot_ly(x = ~MAF, y = ~Quality, color = ~Type,
   text = ~sprintf('MAF: %f\n%s: %f\nSNP: %s',
       MAF, if_else(Type == "Genotyped", "Empirical R²", "R²"), Quality, SNP),
   height = 600) %>%
-  layout(title = paste0(params$cohort, ": Quality score by MAF"),
+  layout(title = paste0(snakemake@params[["cohort"]], ": Quality score by MAF"),
          xaxis = list(type = "log", range = c(-5, -0.3), title = "Minor Allele Frequency (MAF)"),
          yaxis = list(range = c(0, 1), title = "Quality (R² for Imputed; Empirical R² for Typed)"),
          legend = list(orientation = 'h')) %>%

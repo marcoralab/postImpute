@@ -21,11 +21,15 @@ def fix_path(path):
     return path
 
 
-def build_samp(in_path):
-    p = os.path.abspath(in_path)
-    p = [directory for directory,y,files in os.walk(p)
-            # if any("info.gz" in f for f in files)]
-            if any(".zip" in f for f in files)]
+def build_samp(in_path, samples = None):
+    p_abs = os.path.abspath(in_path)
+    p = [directory for directory,y,files in os.walk(p_abs)
+         if any(".zip" in f for f in files)]
+    if len(p) == 0:
+        p = [directory for directory,y,files in os.walk(p_abs)
+             if any("info.gz" in f for f in files)]
+    if samples is not None:
+        p = [x for x in p if x in samples]
     return [os.path.basename(x) for x in p]
 
 
@@ -35,7 +39,10 @@ def parser_postImpute(config):
 
     # Figure out samples
     in_path = fix_path(config["directory"])
-    cohort = build_samp(in_path)
+    if "SAMPLES" in config:
+        cohort = build_samp(in_path, [*config["SAMPLES"]])
+    else:
+        cohort = build_samp(in_path)
 
     # Make copy file with exclusions, else make empty one
     if "exclude_samp" in config:
