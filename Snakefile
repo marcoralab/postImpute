@@ -13,7 +13,7 @@ RWD = os.getcwd()
 
 configfile: "config/config.yaml"
 
-zipped = 'SAMPLES' in config else
+zipped = 'SAMPLES' in config and type(config['SAMPLES']) is dict
 
 BPLINK = ["bed", "bim", "fam"]
 
@@ -62,12 +62,14 @@ sampfilt = build_sampfilt_vcf(config)
 
 
 def build_samp(in_path, samples = None):
-    p = [directory for directory,y,files in os.walk(p_abs)
+    p = [directory for directory,y,files in os.walk(in_path)
          if any(".zip" in f for f in files)]
     if len(p) == 0:
-        p = [directory for directory,y,files in os.walk(p_abs)
+        p = [directory for directory,y,files in os.walk(in_path)
              if any("info.gz" in f for f in files)]
     if samples is not None:
+        if not p:
+            return samples
         p = [x for x in p if x in samples]
     return [os.path.basename(x) for x in p]
 
@@ -126,7 +128,7 @@ if zipped:
             vcf = "{impute_dir}/input/{cohort}/chr{chrom}.dose.vcf.gz",
             info = "{impute_dir}/input/{cohort}/chr{chrom}.info.gz"
         params:
-            passwd = lambda wildcards: SAMPLES.loc[wildcards.cohort]['JOB']['pwd'],
+            passwd = lambda wildcards: config['SAMPLES'][wildcards.cohort]['pwd'],
             odir = "{impute_dir}/input/{cohort}",
             INPATH = INPATH
         conda: 'workflow/envs/p7z.yaml'

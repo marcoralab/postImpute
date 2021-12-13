@@ -7,11 +7,9 @@ directory_in: HRC_impute/
 directory_out: output/
 
 SAMPLES:
-  -
-    COHORT: "COHORT_NAME"
-    JOB:
-      id: "job-20210518-083345-127"
-      pwd: "5vZMb8lF\\|TdqSH"
+  COHORT_NAME:
+    id: "job-20210518-083345-127"
+    pwd: "5vZMb8lF\\|TdqSH"
 
 
 outputs: # Comment out any line with outputs you don't want
