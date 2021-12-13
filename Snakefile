@@ -118,6 +118,10 @@ def expand_outs(out):
 
 outputs = flatten([expand_outs(outs[x]) for x in config["outputs"]])
 
+wildcard_constraints:
+    cohort="|".join(COHORT),
+    chrom="|".join(CHROM)
+
 rule all:
     input: outputs
 
