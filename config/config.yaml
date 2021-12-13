@@ -1,9 +1,10 @@
 # snakejob -j 100 --use-conda --keep-going --notemp -np
 # snakemake --forceall --rulegraph | dot -Tpdf > docs/dag.pdf
 
-# Directory where input imputed filesets are.
+# Directory where input imputed filesets and outputs are.
 # No trailing / is required.
-directory: HRC_impute/
+directory_in: HRC_impute/
+directory_out: output/
 
 SAMPLES:
   -
@@ -46,11 +47,11 @@ include_samp:
 # filename of samples to exclude
 exclude_samp:
 
-# --keep accepts a space/tab-delimited text file with
-# family IDs in the first column and within-family IDs
-# in the second column, and removes all unlisted samples
-# from the current analysis. --remove does the same for
-# all listed samples.
+# include_samp accepts a space/tab-delimited text file with
+# vcf IDs in the first column and optional sex in the
+# second column, and removes all unlisted samples
+# from the current analysis. exclude_samp does the same
+# for all listed samples.
 
 # filename of sample renaming mapping file:
 rename:

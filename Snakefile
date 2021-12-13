@@ -64,7 +64,6 @@ sampfilt = build_sampfilt_vcf(config)
 
 
 def build_samp(in_path, samples = None):
-    p_abs = os.path.abspath(in_path)
     p = [directory for directory,y,files in os.walk(p_abs)
          if any(".zip" in f for f in files)]
     if len(p) == 0:
@@ -75,7 +74,8 @@ def build_samp(in_path, samples = None):
     return [os.path.basename(x) for x in p]
 
 
-INPATH = os.path.abspath(config["directory"]) + '/' # normalize input dir
+INPATH = os.path.abspath(config["directory_in"]) # normalize input dir
+OUTPATH = os.path.abspath(config["directory_out"]) # normalize out dir
 
 if "SAMPLES" in config:
     COHORT = build_samp(INPATH, [*config["SAMPLES"]])
@@ -104,21 +104,19 @@ if config["qc"]["rsq2"] and config["qc"]["rsq2"] != 'NA':
     qualfilt += " || (R2 >= {R2} && MAF < {MAF})".format(
         R2=config["qc"]["rsq2"], MAF=config["qc"]["maf"])
 
-plink_bycohort = "{impute_dir}/data/{cohort}_chrall_filtered.{ext}"
-plink_merged = "{impute_dir}/data/all_chrall_filtered.{ext}"
-
 outs = dict(
-    stat_report=expand("{impute_dir}/stats/{cohort}_impStats.html", cohort=COHORT, impute_dir=config['directory']),
-    vcf_bycohort=expand("{impute_dir}/data/{cohort}_chrall_filtered.vcf.gz", cohort=COHORT, impute_dir=config['directory']),
-    vcf_merged=expand("{impute_dir}/data/all_chrall_filtered.vcf.gz", impute_dir=config['directory']),
-    bgen_bycohort=expand("{impute_dir}/data/{cohort}_chrall_filtered.bgen", cohort=COHORT, impute_dir=config['directory']),
-    bgen_merged=expand("{impute_dir}/data/merged/merged_chrall_filtered.bgen", impute_dir=config['directory']),
-    plink_bycohort=expand(plink_bycohort, cohort=COHORT, ext=BPLINK, impute_dir=config['directory']),
-    plink_merged=expand(plink_merged, ext=BPLINK, impute_dir=config['directory'])
-            )
+    stat_report="{impute_dir}/stats/{cohort}_impStats.html",
+    vcf_bycohort="{impute_dir}/data/{cohort}_chrall_filtered.vcf.gz",
+    vcf_merged="{impute_dir}/data/all_chrall_filtered.vcf.gz",
+    bgen_bycohort="{impute_dir}/data/{cohort}_chrall_filtered.bgen",
+    bgen_merged="{impute_dir}/data/merged/merged_chrall_filtered.bgen",
+    plink_bycohort="{impute_dir}/data/{cohort}_chrall_filtered.{ext}",
+    plink_merged="{impute_dir}/data/all_chrall_filtered.{ext}")
 
-outputs = [outs[x] for x in config["outputs"]]
-outputs = flatten(outputs)
+def expand_outs(out):
+    return expand(out, cohort=COHORT, ext=BPLINK, impute_dir=OUTPATH)
+
+outputs = flatten([expand_outs(outs[x]) for x in config["outputs"]])
 
 rule all:
     input: outputs
@@ -154,7 +152,7 @@ def stats_input(wildcards):
             impute_dir=wildcards["impute_dir"],
             chrom=CHROM)
     else:
-        return expand(INPATH + "{{cohort}}/chr{chrom}.info.gz",
+        return expand(INPATH + "/{{cohort}}/chr{chrom}.info.gz",
             chrom=CHROM)
 
 
@@ -179,7 +177,7 @@ rule stats:
     script: "workflow/scripts/Post_imputation.Rmd"
 
 # Sample filtering rules
-startfile =  "{impute_dir}/input/{cohort}/chr{chrom}.dose.vcf.gz" if zipped else INPATH + "{cohort}/chr{chrom}.dose.vcf.gz"
+startfile =  "{impute_dir}/input/{cohort}/chr{chrom}.dose.vcf.gz" if zipped else INPATH + "/{cohort}/chr{chrom}.dose.vcf.gz"
 
 rule indexinitial:
     input: startfile
@@ -257,7 +255,7 @@ fi'''
 # defaults for renaming:
 renamed_cat = "{{impute_dir}}/data/by_chrom/{{cohort}}_chr{chrom}_filtered.vcf.gz"
 renamed = "{impute_dir}/data/by_chrom/{cohort}_chr{chrom}_filtered.vcf.gz"
-renamed_merge = "{impute_dir}/data/by_chrom/{cohort}_chr{{chrom}}_filtered.vcf.gz"
+renamed_merge = "{{impute_dir}}/data/by_chrom/{cohort}_chr{{chrom}}_filtered.vcf.gz"
 automap_tf = False
 rename_tf = False
 
@@ -271,13 +269,13 @@ if 'rename' in config:
         automap = config['rename']['automap']
         renamed_cat = "{{impute_dir}}/data/by_chrom/{{cohort}}_chr{chrom}_filtered_fixedIDs.vcf.gz"
         renamed = "{impute_dir}/data/by_chrom/{cohort}_chr{chrom}_filtered_fixedIDs.vcf.gz"
-        renamed_merge = "{impute_dir}/data/by_chrom/{cohort}_chr{{chrom}}_filtered_fixedIDs.vcf.gz"
+        renamed_merge = "{{impute_dir}}/data/by_chrom/{cohort}_chr{{chrom}}_filtered_fixedIDs.vcf.gz"
     elif config['rename'] and not type(config['rename']) is dict:
         print("Manualy renameing samples")
         renamefile = config['rename']
         renamed_cat = "{{impute_dir}}/data/by_chrom/{{cohort}}_chr{chrom}_filtered_renamed.vcf.gz"
         renamed = "{impute_dir}/data/by_chrom/{cohort}_chr{chrom}_filtered_renamed.vcf.gz"
-        renamed_merge = "{impute_dir}/data/by_chrom/{cohort}_chr{{chrom}}_filtered_renamed.vcf.gz"
+        renamed_merge = "{{impute_dir}}/data/by_chrom/{cohort}_chr{{chrom}}_filtered_renamed.vcf.gz"
 
 rule rename:
     input:
@@ -323,15 +321,15 @@ rule index_samples_chrom:
 
 rule merge_samples_chrom:
     input:
-        vcf = expand(renamed_merge, cohort=COHORT, impute_dir=config['directory']),
-        tbi = expand(renamed_merge + ".tbi", cohort=COHORT, impute_dir=config['directory'])
+        vcf = expand(renamed_merge, cohort=COHORT),
+        tbi = expand(renamed_merge + ".tbi", cohort=COHORT)
     output: "{impute_dir}/data/by_chrom/all_chr{chrom}_filtered.vcf.gz"
     threads: 8
     conda: "workflow/envs/bcftools.yaml"
     shell: "bcftools merge -m none -o {output} -Oz --threads 8 {input.vcf}"
 
 rule concat_chroms_all:
-    input: expand("data/by_chrom/all_chr{chrom}_filtered.vcf.gz", chrom=CHROM, impute_dir=config['directory'])
+    input: expand("{impute_dir}/data/by_chrom/all_chr{chrom}_filtered.vcf.gz", chrom=CHROM)
     output: "{impute_dir}/data/all_chrall_filtered.vcf.gz"
     threads: 8
     conda: "workflow/envs/bcftools.yaml"
