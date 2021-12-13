@@ -148,8 +148,7 @@ if zipped:
 
 def stats_input(wildcards):
     if zipped:
-        return expand("{impute_dir}/input/{{cohort}}/chr{chrom}.info.gz",
-            impute_dir=wildcards["impute_dir"],
+        return expand("{{impute_dir}}/input/{{cohort}}/chr{chrom}.info.gz",
             chrom=CHROM)
     else:
         return expand(INPATH + "/{{cohort}}/chr{chrom}.info.gz",
@@ -300,11 +299,11 @@ rule renameAuto:
         vcf = rules.filters.output,
         header = rules.fixHeader.output.reheader
     output:
-        fixed = temp("{impute_dir}/data/by_chrom/{cohort}_chr{chrom}_filtered_fixedIDs.vcf.gz"),
+        temp("{impute_dir}/data/by_chrom/{cohort}_chr{chrom}_filtered_fixedIDs.vcf.gz"),
     conda: "workflow/envs/bcftools.yaml"
     shell:
-        "bcftools reheader --samples {output.reheader} {input.vcf} | "
-        "bcftools view -o {output.fixed} -Oz"
+        "bcftools reheader --samples {input.header} {input.vcf} | "
+        "bcftools view -o {output} -Oz"
 
 rule concat_chroms_samp:
     input: expand(renamed_cat, chrom=CHROM)
@@ -329,7 +328,7 @@ rule merge_samples_chrom:
     shell: "bcftools merge -m none -o {output} -Oz --threads 8 {input.vcf}"
 
 rule concat_chroms_all:
-    input: expand("{impute_dir}/data/by_chrom/all_chr{chrom}_filtered.vcf.gz", chrom=CHROM)
+    input: expand("{{impute_dir}}/data/by_chrom/all_chr{chrom}_filtered.vcf.gz", chrom=CHROM)
     output: "{impute_dir}/data/all_chrall_filtered.vcf.gz"
     threads: 8
     conda: "workflow/envs/bcftools.yaml"
