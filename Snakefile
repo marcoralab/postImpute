@@ -1,8 +1,6 @@
 '''Snakefile for MIS post-imputation QC'''
 
-from workflow.scripts.parse_config import parser_postImpute
 from getpass import getuser
-
 import pandas as pd
 import os
 import socket
