@@ -1,5 +1,4 @@
-'''Snakefile for MIS post-imputation QC
-   Version 0.1.1'''
+'''Snakefile for MIS post-imputation QC'''
 
 from workflow.scripts.parse_config import parser_postImpute
 from getpass import getuser
@@ -7,25 +6,86 @@ from getpass import getuser
 import pandas as pd
 import os
 import socket
+import re
+import glob
+import shutil
+
 
 RWD = os.getcwd()
 
-# import ipdb; ipdb.set_trace()
-
 configfile: "config/config.yaml"
-if 'SAMPLES' in config:
-    zipped = True
-    S2 = [{'COHORT': x, 'JOB': y} for x, y in config["SAMPLES"].items()]
-    SAMPLES = pd.DataFrame.from_records(S2, index = "COHORT")
-else:
-    zipped = False
+
+zipped = 'SAMPLES' in config else
 
 BPLINK = ["bed", "bim", "fam"]
 
-CHROM, COHORT, INPATH, KEEP_COMMAND = parser_postImpute(config)
+# --- Process chromosomes config ---
+
+
+def parse_chrom(chrs):
+    clist = [x.split(":") for x in chrs.split(",")]
+    parsed = []
+    for chrs in clist:
+        if len(chrs) == 2:
+            chrs = [str(c) for c in range(int(chrs[0]), int(chrs[1]) + 1)]
+        elif len(chrs) != 1:
+            raise ValueError("Invalid chromosome list.")
+        parsed += chrs
+    return parsed
+
+
+if 'chrom' not in config:
+    CHROM = parse_chrom('1:22')
+else:
+    CHROM = parse_chrom(config['chroms'])
+
+# --- Process keep and remove ---
+
+
+def build_sampfilt_vcf(config):
+    def filtstr(x):
+        if not (x in config and config[x] and config[x] is not None):
+            return None
+        elif os.path.isfile(config[x]):
+            paramstr = '' if x == 'include_samp' else '^'
+            return '{}{}'.format(paramstr, os.path.normpath(config[x]))
+        else:
+            filt = 'inclusion' if x == 'include_samp' else 'exclusion'
+            raise Exception("Invalid {} list: {}.".format(filt, config[x]))
+    x = [filtstr(x) for x in ['include_samp', 'exclude_samp']]
+    x = [i for i in x if i is not None]
+    if len(x) > 1:
+        raise Exception('Cannot have both sample removal and exclusion.')
+    return 'bcftools view --samples-file '+ x[0] if x else ''
+
+sampfilt = build_sampfilt_vcf(config)
+
+# --- Process input files from config ---
+
+
+def build_samp(in_path, samples = None):
+    p_abs = os.path.abspath(in_path)
+    p = [directory for directory,y,files in os.walk(p_abs)
+         if any(".zip" in f for f in files)]
+    if len(p) == 0:
+        p = [directory for directory,y,files in os.walk(p_abs)
+             if any("info.gz" in f for f in files)]
+    if samples is not None:
+        p = [x for x in p if x in samples]
+    return [os.path.basename(x) for x in p]
+
+
+INPATH = os.path.abspath(config["directory"]) + '/' # normalize input dir
+
+if "SAMPLES" in config:
+    COHORT = build_samp(INPATH, [*config["SAMPLES"]])
+else:
+    COHORT = build_samp(INPATH)
+
+# --- Done processing ---
+
 fixheaders = config['fixheaders'] if 'fixheaders' in config else True
 
-#import ipdb; ipdb.set_trace()
 
 def flatten(nested):
     flat = []
@@ -43,15 +103,6 @@ qualfilt = "(R2 >= {R2} && MAF >= {MAF})".format(
 if config["qc"]["rsq2"] and config["qc"]["rsq2"] != 'NA':
     qualfilt += " || (R2 >= {R2} && MAF < {MAF})".format(
         R2=config["qc"]["rsq2"], MAF=config["qc"]["maf"])
-
-# remove subjects if sample filtering file is provided
-sampfilt = ""
-if config["exclude_samp"] or config["include_samp"]:
-    sampfilt += "bcftools view --samples-file "
-    if config["exclude_samp"]:
-        sampfilt += "^{}".format(config["exclude_samp"])
-    if config["include_samp"]:
-        sampfilt += "{}".format(config["include_samp"])
 
 plink_bycohort = "{impute_dir}/data/{cohort}_chrall_filtered.{ext}"
 plink_merged = "{impute_dir}/data/all_chrall_filtered.{ext}"
@@ -71,7 +122,7 @@ outputs = flatten(outputs)
 
 rule all:
     input: outputs
-# import ipdb; ipdb.set_trace()
+
 if zipped:
     rule unzip:
         input: "{cohort}/chr_{chrom}.zip"
@@ -96,11 +147,16 @@ if zipped:
             done
             '''
 
+
 def stats_input(wildcards):
-    return expand("{impute_dir}/input/{cohort}/chr{chrom}.info.gz",
-        impute_dir=wildcards["impute_dir"],
-        cohort=wildcards["cohort"],
-        chrom=CHROM)
+    if zipped:
+        return expand("{impute_dir}/input/{{cohort}}/chr{chrom}.info.gz",
+            impute_dir=wildcards["impute_dir"],
+            chrom=CHROM)
+    else:
+        return expand(INPATH + "{{cohort}}/chr{chrom}.info.gz",
+            chrom=CHROM)
+
 
 rule stats:
     input:
