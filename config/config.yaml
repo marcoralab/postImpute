@@ -3,34 +3,15 @@
 
 # Directory where input imputed filesets are.
 # No trailing / is required.
+directory: HRC_impute/
+
 SAMPLES:
   -
-    COHORT: "ADNI_1"
+    COHORT: "COHORT_NAME"
     JOB:
       id: "job-20210518-083345-127"
       pwd: "5vZMb8lF\\|TdqSH"
-  -
-    COHORT: "ADNI_GO"
-    JOB:
-      id: "job-20210512-083718-986"
-      pwd: "qQCT2g95rRlqVo"
-  -
-    COHORT: "ADNI_2"
-    JOB:
-      id: "job-20210512-083700-297"
-      pwd: "Jrrm9PjqLGp5QM"
-  -
-    COHORT: "ADNI_3"
-    JOB:
-      id: "job-20210511-142854-619"
-      pwd: "iZv3KAgKmda8WF"
-  -
-    COHORT: "Omni25M"
-    JOB:
-      id: "job-20210511-135959-807"
-      pwd: "1cJ2cIMC\\$zNdwh"
 
-directory: HRC_impute/
 
 outputs: # Comment out any line with outputs you don't want
   - stat_report # A report of imputation quality
@@ -74,5 +55,3 @@ exclude_samp:
 # filename of sample renaming mapping file:
 rename:
 #  automap:
-
-anaconda:
