@@ -74,8 +74,8 @@ def build_samp(in_path, samples = None):
     return [os.path.basename(x) for x in p]
 
 
-INPATH = os.path.abspath(config["directory_in"]) # normalize input dir
-OUTPATH = os.path.abspath(config["directory_out"]) # normalize out dir
+INPATH = os.path.normpath(config["directory_in"]) # normalize input dir
+OUTPATH = os.path.normpath(config["directory_out"]) # normalize out dir
 
 if "SAMPLES" in config:
     COHORT = build_samp(INPATH, [*config["SAMPLES"]])
