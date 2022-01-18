@@ -9,9 +9,9 @@ rule make_bgen:
     resources:
         mem_mb = 4000,
         walltime = "24:00"
+    container: 'docker://befh/bgen:v1.1.7'
     shell:
         """
-module load qctool/v2
 qctool -g {input.gen} -vcf-genotype-field GP \
 -os {output.samp} -og {output.bgen}
 """
@@ -27,6 +27,7 @@ rule cat_bgen_samp:
     resources:
         mem_mb = 5000,
         walltime = "120:00"
+    container: 'docker://befh/bgen:v1.1.7'
     shell:
         """
 cat-bgen -g {input.gen} -og {output.gen}
@@ -48,9 +49,9 @@ rule make_bgen_allsamp:
     resources:
         mem_mb = 4000,
         walltime = "24:00"
+    container: 'docker://befh/bgen:v1.1.7'
     shell:
         """
-module load qctool/v2
 qctool {params.args} -og {output.bgen} -os {output.samp} -threads 10
 """
 
@@ -65,4 +66,5 @@ rule cat_bgen_allsamp:
     resources:
         mem_mb = 5000,
         walltime = "120:00"
+    container: 'docker://befh/bgen:v1.1.7'
     shell: "cat-bgen -g {input.gen} -og {output.gen}; cp {input.samp} {output.samp}"
