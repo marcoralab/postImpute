@@ -5,6 +5,10 @@ rule make_bgen:
     output:
         bgen = temp("{impute_dir}/temp/{cohort}_chr{chrom}_filtered.bgen"),
         samp = temp("{impute_dir}/temp/{cohort}_chr{chrom}.sample")
+    threads: 1
+    resources:
+        mem_mb = 4000,
+        walltime = "24:00"
     shell:
         """
 module load qctool/v2
@@ -19,6 +23,10 @@ rule cat_bgen_samp:
     output:
         gen = "{impute_dir}/data/{cohort}_chrall_filtered.bgen",
         samp = "{impute_dir}/data/{cohort}_chrall.sample"
+    threads: 1
+    resources:
+        mem_mb = 5000,
+        walltime = "120:00"
     shell:
         """
 cat-bgen -g {input.gen} -og {output.gen}
@@ -37,6 +45,9 @@ rule make_bgen_allsamp:
     params:
         args = " ".join(["-g {} -s {}".format(gen, samp) for gen, samp in zip(bga_gen, bga_samp)])
     threads: 10
+    resources:
+        mem_mb = 4000,
+        walltime = "24:00"
     shell:
         """
 module load qctool/v2
@@ -50,4 +61,8 @@ rule cat_bgen_allsamp:
     output:
         gen = "{impute_dir}/data/merged/merged_chrall_filtered.bgen",
         samp = "{impute_dir}/data/merged/merged_chrall.sample"
+    threads: 1
+    resources:
+        mem_mb = 5000,
+        walltime = "120:00"
     shell: "cat-bgen -g {input.gen} -og {output.gen}; cp {input.samp} {output.samp}"
