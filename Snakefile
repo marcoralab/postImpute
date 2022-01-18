@@ -54,15 +54,17 @@ def build_sampfilt_vcf(config):
     x = [i for i in x if i is not None]
     if len(x) > 1:
         raise Exception('Cannot have both sample removal and exclusion.')
-    return 'bcftools view --samples-file '+ x[0] if x else ''
+    return 'bcftools view --samples-file ' + x[0] if x else ''
+
 
 sampfilt = build_sampfilt_vcf(config)
 
 # --- Process input files from config ---
 
 
-def build_samp(in_path, samples = None):
-    p = [directory for directory,y,files in os.walk(in_path)
+def build_samp(in_path, samples=None):
+    basename = lambda x: os.path.basename(x)
+    p = [directory for directory, y, files in os.walk(in_path)
          if any(".zip" in f for f in files)]
     if len(p) == 0:
         p = [directory for directory,y,files in os.walk(in_path)
@@ -70,12 +72,12 @@ def build_samp(in_path, samples = None):
     if samples is not None:
         if not p:
             return samples
-        p = [x for x in p if x in samples]
-    return [os.path.basename(x) for x in p]
+        return [basename(x) for x in p if basename(x) in samples]
+    return [basename(x) for x in p]
 
 
-INPATH = os.path.normpath(config["directory_in"]) # normalize input dir
-OUTPATH = os.path.normpath(config["directory_out"]) # normalize out dir
+INPATH = os.path.normpath(config["directory_in"])    #  normalize input dir
+OUTPATH = os.path.normpath(config["directory_out"])  #  normalize out dir
 
 if "SAMPLES" in config:
     COHORT = build_samp(INPATH, [*config["SAMPLES"]])
@@ -113,14 +115,16 @@ outs = dict(
     plink_bycohort="{impute_dir}/data/{cohort}_chrall_filtered.{ext}",
     plink_merged="{impute_dir}/data/all_chrall_filtered.{ext}")
 
+
 def expand_outs(out):
     return expand(out, cohort=COHORT, ext=BPLINK, impute_dir=OUTPATH)
+
 
 outputs = flatten([expand_outs(outs[x]) for x in config["outputs"]])
 
 wildcard_constraints:
-    cohort="|".join(COHORT),
-    chrom="|".join(CHROM)
+    cohort = "|".join(COHORT),
+    chrom = "|".join(CHROM)
 
 rule all:
     input: outputs
@@ -180,7 +184,7 @@ rule stats:
     script: "workflow/scripts/Post_imputation.Rmd"
 
 # Sample filtering rules
-startfile =  "{impute_dir}/input/{cohort}/chr{chrom}.dose.vcf.gz" if zipped else INPATH + "/{cohort}/chr{chrom}.dose.vcf.gz"
+startfile = "{impute_dir}/input/{cohort}/chr{chrom}.dose.vcf.gz" if zipped else INPATH + "/{cohort}/chr{chrom}.dose.vcf.gz"
 
 rule indexinitial:
     input: startfile
@@ -228,11 +232,16 @@ if sampfilt:
         shell:
             r'''
 if zcat {input.vcf} | head -n 4000 | grep -q "##INFO=<ID=IMPUTED"; then
+  echo "Processing Minimac4 file"
   {params.sf} --force-samples -Oz --threads 8 {input.vcf} | \
-  bcftools annotate -i "INFO/TYPED=1 || INFO/TYPED_ONLY=1 || {params.filt}" -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8
+  bcftools annotate -i "INFO/TYPED=1 || INFO/TYPED_ONLY=1 || {params.filt}" \
+    -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8
 else
+  echo "Processing Minimac3 file"
   {params.sf} --force-samples -Oz --threads 8 {input.vcf} | \
-  bcftools annotate -i "%FILTER='GENOTYPED' || %FILTER='GENOTYPED_ONLY' || {params.filt}" -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8
+  bcftools annotate -i \
+    "%FILTER='GENOTYPED' || %FILTER='GENOTYPED_ONLY' || {params.filt}" \
+    -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8
 fi'''
 
 else:
@@ -249,10 +258,13 @@ else:
             r'''
 if zcat {input.vcf} | head -n 4000 | grep -q "##INFO=<ID=IMPUTED"; then
   echo "Processing Minimac4 file"
-  bcftools annotate -i "INFO/TYPED=1 || INFO/TYPED_ONLY=1 || {params.filt}" -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8 {input.vcf}
+  bcftools annotate -i "INFO/TYPED=1 || INFO/TYPED_ONLY=1 || {params.filt}" \
+    -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8 {input.vcf}
 else
   echo "Processing Minimac3 file"
-  bcftools annotate -i "%FILTER='GENOTYPED' || %FILTER='GENOTYPED_ONLY' || {params.filt}" -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8 {input.vcf}
+  bcftools annotate -i \
+    "%FILTER='GENOTYPED' || %FILTER='GENOTYPED_ONLY' || {params.filt}" \
+    -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8 {input.vcf}
 fi'''
 
 # defaults for renaming:
@@ -284,9 +296,14 @@ rule rename:
     input:
         vcf = rules.filters.output,
         mapping = renamefile if rename_tf else "/dev/null"
-    output: temp("{impute_dir}/data/by_chrom/{cohort}_chr{chrom}_filtered_renamed.vcf.gz")
+    output:
+        temp("{impute_dir}/data/by_chrom/{cohort}_chr{chrom}_filtered_renamed.vcf.gz")
     conda: "workflow/envs/bcftools.yaml"
-    shell: "bcftools reheader --samples {input.mapping} -o {output} -Oz {input.vcf}"
+    shell:
+        '''
+bcftools reheader --samples {input.mapping} -o {output} | \
+  bcftools view -o {output} -Oz
+'''
 
 rule fixHeader:
     input:
@@ -306,8 +323,10 @@ rule renameAuto:
         temp("{impute_dir}/data/by_chrom/{cohort}_chr{chrom}_filtered_fixedIDs.vcf.gz"),
     conda: "workflow/envs/bcftools.yaml"
     shell:
-        "bcftools reheader --samples {input.header} {input.vcf} | "
-        "bcftools view -o {output} -Oz"
+        '''
+bcftools reheader --samples {input.header} {input.vcf} | \
+  bcftools view -o {output} -Oz
+'''
 
 rule concat_chroms_samp:
     input: expand(renamed_cat, chrom=CHROM)
