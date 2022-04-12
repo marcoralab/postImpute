@@ -81,6 +81,8 @@ OUTPATH = os.path.normpath(config["directory_out"])  #  normalize out dir
 
 if "SAMPLES" in config:
     COHORT = build_samp(INPATH, [*config["SAMPLES"]])
+elif "COHORT" in config:
+    COHORT = build_samp(INPATH, [*config["COHORT"]])
 else:
     COHORT = build_samp(INPATH)
 
