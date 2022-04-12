@@ -174,7 +174,7 @@ rule stats:
         outfile = "{impute_dir}/stats/{cohort}_impStats.html"
     params:
         rwd = RWD,
-        path = "{impute_dir}/input/{cohort}/",
+        path = "{impute_dir}/input/{cohort}/" if zipped else INPATH + "/{cohort}/",
         chrom = CHROM,
         cohort = "{cohort}",
         maf = config["qc"]["maf"],
@@ -187,7 +187,7 @@ rule stats:
     conda: "workflow/envs/r.yaml"
     threads: 22
     resources:
-        mem_mb = 6000,
+        mem_mb = 24000,
         walltime = '8:00'
     script: "workflow/scripts/Post_imputation.Rmd"
 
