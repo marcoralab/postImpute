@@ -139,7 +139,7 @@ if zipped:
             passwd = lambda wildcards: config['SAMPLES'][wildcards.cohort]['pwd'],
             odir = "{impute_dir}/input/{cohort}",
             INPATH = INPATH
-        conda: 'workflow/envs/p7z.yaml'
+        conda: 'envs/p7z.yaml'
         threads: 4
         resources:
             mem_mb = 4000,
@@ -184,7 +184,7 @@ rule stats:
         out = "{cohort}_impStats.html",
         output_dir = "{impute_dir}/stats",
         reading = "P"
-    conda: "workflow/envs/r.yaml"
+    conda: "envs/r.yaml"
     threads: 22
     resources:
         mem_mb = 24000,
@@ -197,7 +197,7 @@ startfile = "{impute_dir}/input/{cohort}/chr{chrom}.dose.vcf.gz" if zipped else 
 rule indexinitial:
     input: startfile
     output: startfile + ".tbi"
-    conda: "workflow/envs/bcftools.yaml"
+    conda: "envs/bcftools.yaml"
     threads: 1
     resources:
         mem_mb = 2048,
@@ -215,7 +215,7 @@ rule fixheaders:
     resources:
         mem_mb = 2048,
         walltime = '24:00'
-    conda: "workflow/envs/bcftools.yaml"
+    conda: "envs/bcftools.yaml"
     shell:
         r"""
 if $(zcat {input} | head -n 4000 | grep -q -e "##FILTER" -e "##INFO=<ID=IMPUTED"); then
@@ -246,7 +246,7 @@ if sampfilt:
         resources:
             mem_mb = 256,
             walltime = '24:00'
-        conda: "workflow/envs/bcftools.yaml"
+        conda: "envs/bcftools.yaml"
         shell:
             r'''
 if zcat {input.vcf} | head -n 4000 | grep -q "##INFO=<ID=IMPUTED"; then
@@ -274,7 +274,7 @@ else:
         resources:
             mem_mb = 256,
             walltime = '24:00'
-        conda: "workflow/envs/bcftools.yaml"
+        conda: "envs/bcftools.yaml"
         shell:
             r'''
 if zcat {input.vcf} | head -n 4000 | grep -q "##INFO=<ID=IMPUTED"; then
@@ -319,7 +319,7 @@ rule rename:
         mapping = renamefile if rename_tf else "/dev/null"
     output:
         temp("{impute_dir}/data/by_chrom/{cohort}_chr{chrom}_filtered_renamed.vcf.gz")
-    conda: "workflow/envs/bcftools.yaml"
+    conda: "envs/bcftools.yaml"
     threads: 2
     resources:
         mem_mb = 1024,
@@ -337,7 +337,7 @@ rule fixHeader:
     output:
         mapping = "{impute_dir}/data/by_chrom/{cohort}_chr{chrom}_vcfmap.tsv",
         reheader = temp("{impute_dir}/data/by_chrom/{cohort}_chr{chrom}_vcfreheader.txt")
-    conda: "workflow/envs/r.yaml"
+    conda: "envs/r.yaml"
     threads: 1
     resources:
         mem_mb = 8000,
@@ -350,7 +350,7 @@ rule renameAuto:
         header = rules.fixHeader.output.reheader
     output:
         temp("{impute_dir}/data/by_chrom/{cohort}_chr{chrom}_filtered_fixedIDs.vcf.gz"),
-    conda: "workflow/envs/bcftools.yaml"
+    conda: "envs/bcftools.yaml"
     threads: 2
     resources:
         mem_mb = 1024,
@@ -368,13 +368,13 @@ rule concat_chroms_samp:
     resources:
         mem_mb = 512,
         walltime = '24:00'
-    conda: "workflow/envs/bcftools.yaml"
+    conda: "envs/bcftools.yaml"
     shell: "bcftools concat -o {output} -Oz --threads 8 {input}"
 
 rule index_samples_chrom:
     input: renamed
     output: renamed + ".tbi"
-    conda: "workflow/envs/bcftools.yaml"
+    conda: "envs/bcftools.yaml"
     threads: 1
     resources:
         mem_mb = 256,
@@ -390,7 +390,7 @@ rule merge_samples_chrom:
     resources:
         mem_mb = 2000,
         walltime = "36:00"
-    conda: "workflow/envs/bcftools.yaml"
+    conda: "envs/bcftools.yaml"
     shell: "bcftools merge -m none -o {output} -Oz --threads 8 {input.vcf}"
 
 rule concat_chroms_all:
@@ -400,7 +400,7 @@ rule concat_chroms_all:
     resources:
         mem_mb = 256,
         walltime = "24:00"
-    conda: "workflow/envs/bcftools.yaml"
+    conda: "envs/bcftools.yaml"
     shell: "bcftools concat -o {output} -Oz --threads 8 {input}"
 
 rule make_plink_all:
@@ -413,7 +413,7 @@ rule make_plink_all:
     resources:
         mem_mb = 3000,
         walltime = "6:00"
-    conda: "workflow/envs/plink.yaml"
+    conda: "envs/plink.yaml"
     shell:
         "plink --keep-allele-order --vcf {input} {params.ID} --memory 10000 --threads 10 --make-bed "
         "--out {params.out_plink}"
@@ -428,10 +428,10 @@ rule make_plink_samp:
     resources:
         mem_mb = 1000,
         walltime = "2:00"
-    conda: "workflow/envs/plink.yaml"
+    conda: "envs/plink.yaml"
     shell:
         "plink --keep-allele-order --vcf {input} {params.ID} --memory 10000 --threads 10 --make-bed "
         "--out {params.out_plink}"
 
 # If bgen outputs are requested
-include: "workflow/rules/bgen.smk"
+include: "rules/bgen.smk"
