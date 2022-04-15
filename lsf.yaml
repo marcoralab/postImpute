@@ -1,2 +1,2 @@
-postImpute_stats:
+stats:
   - "-R 'himem'"
