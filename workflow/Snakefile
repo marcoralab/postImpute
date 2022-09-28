@@ -186,12 +186,12 @@ rule stats:
         out = "{cohort}_impStats.html",
         output_dir = "{impute_dir}/stats",
         reading = "P"
-    conda: "envs/r.yaml"
+    conda: "envs/r_stats.yaml"
     threads: 22
     resources:
         mem_mb = 24000,
         walltime = '8:00'
-    script: "workflow/scripts/Post_imputation.Rmd"
+    script: "scripts/Post_imputation.Rmd"
 
 # Sample filtering rules
 startfile = "{impute_dir}/input/{cohort}/chr{chrom}.dose.vcf.gz" if zipped else INPATH + "/{cohort}/chr{chrom}.dose.vcf.gz"
@@ -414,7 +414,7 @@ rule make_plink_all:
     threads: 10
     resources:
         mem_mb = 3000,
-        walltime = "6:00"
+        walltime = "96:00"
     conda: "envs/plink.yaml"
     shell:
         "plink --keep-allele-order --vcf {input} {params.ID} --memory 10000 --threads 10 --make-bed "

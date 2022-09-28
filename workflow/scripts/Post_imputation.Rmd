@@ -17,20 +17,22 @@ output: html_document
 ---
 ```{r setup, include=FALSE, warning=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_knit$set(root.dir = snakemake@params[['rwd']])
+knitr::opts_knit$set(root.dir = snakemake@params[["rwd"]])
 
 ##---- Requried Pacakges ----##
-library(tidyverse) ## data wrangling
-library(ggplot2)   ## plotting
-library(scales)    ## for using commas on ggplot scales
-# library(feather)   ## for outputing data to .feather format
-library(kableExtra)## displaing tables nicly in html
-library(stringr)   ## replace substring for file output
-library(magrittr)
-library(doParallel)
-library(foreach)
+suppressPackageStartupMessages(library(dplyr)) ## data wrangling
+library(tidyr)
+library(ggplot2)    ## plotting
+library(scales)     ## for using commas on ggplot scales
+## displaing tables nicly in html
+suppressPackageStartupMessages(library(kableExtra))
+library(stringr)    ## replace substring for file output
+suppressPackageStartupMessages(library(magrittr))
+library(furrr)
+library(httr)
 
-no_rsq2 = is.na(snakemake@params[["rsq2"]]) || snakemake@params[["rsq2"]] == "NA"
+no_rsq2 <- (is.na(snakemake@params[["rsq2"]]) ||
+            snakemake@params[["rsq2"]] == "NA")
 
 if (!no_rsq2) {
   rsqs <- c(snakemake@params[["rsq"]], snakemake@params[["rsq2"]])
@@ -40,7 +42,8 @@ if (!no_rsq2) {
 
 ishtml <- knitr::opts_knit$get("rmarkdown.pandoc.to") == "html"
 
-samp_pretty <- prettyNum(snakemake@params[["sampsize"]], big.mark=",", preserve.width="none")
+samp_pretty <- prettyNum(snakemake@params[["sampsize"]],
+                         big.mark = ",", preserve.width = "none")
 
 ## Parse the chromosome list
 
@@ -59,11 +62,11 @@ chr_parse <- function(chr_arg) {
 
 choose_files <- function(path, chrom) {
   f_list <- list.files(path = path, pattern = "*.info.gz")
-  files_use = c()
-  chroms_missing = c()
+  files_use <- c()
+  chroms_missing <- c()
   for (i in chrom) {
-    ch = paste0("chr",i, ".info.gz")
-    chrom_present = grepl(ch, f_list)
+    ch <- paste0("chr", i, ".info.gz")
+    chrom_present <- grepl(ch, f_list)
     if (any(chrom_present)) {
       files_use[length(files_use) + 1] <- ch
     } else {
@@ -78,133 +81,143 @@ choose_files <- function(path, chrom) {
 ```{r data, include=FALSE, warning=FALSE, message=FALSE}
 ##---- Data Wrangling ----##
 
-myFiles <- choose_files(snakemake@params[["path"]], chr_parse(snakemake@params[["chrom"]]))
+files <- choose_files(snakemake@params[["path"]],
+                      chr_parse(snakemake@params[["chrom"]]))
 
 ##  Read info files into R
 read_info <- function(f) {
   message(sprintf("Loading %s...", f))
-  #Read MAF, Rsq, and EmpRsq as numeric, replacing '-' with NA
-  dat.raw <- vroom::vroom(f, col_types = 'cccnnnncnnncc', na = c("-"))
-  dat <- dat.raw %>%
+  #Read MAF, Rsq, and EmpRsq as numeric, replacing "-" with NA
+  f %>%
+    vroom::vroom(col_types = "cccnnnncnnncc", na = c("-")) %>%
     #Seperate CHR:POS columns
-    separate(SNP, c('CHR', 'POS'), sep = ":") %>%
+    separate(SNP, c("CHR", "POS"), sep = ":") %>%
     #Turn Position into an integer
     mutate(POS = as.integer(POS)) %>%
     #Make SNP column with CHROM:POS:REF:ALT
-    unite(SNP, c(CHR, POS, 'REF(0)', 'ALT(1)'), sep = ':', remove = F) %>%
+    unite(SNP, c(CHR, POS, "REF(0)", "ALT(1)"),
+          sep = ":", remove = FALSE) %>%
     #Select only relevant columns
     select(SNP, CHR, POS, MAF, Rsq, EmpRsq, Genotyped)
 }
 
-myPathFiles <- paste0(snakemake@params[["path"]], myFiles)
+path_files <- paste0(snakemake@params[["path"]], files)
+
+snakemake@wildcards[["cohort"]] %>%
+  paste0("_impStats.rda") %>%
+  save.image()
+
 if (snakemake@params[["reading"]] == "P") {
-  registerDoParallel(cores = 11)
-  dat <- foreach(i = myPathFiles, .combine = rbind) %dopar% read_info(i)
+  plan(multicore(workers = 11))
 } else {
-  dat = list()
-  for ( i in myPathFiles ) {
-    dat[[i]] <- read_info(i)
-  }
-  dat %<>% combine
+  plan(sequential())
 }
 
+dat <- future_map(path_files, read_info)
+
 # create new varible with MAF bins
-mafbin.break <- c(-Inf, 0.0005, 0.001, 0.005, 0.01, 0.02, 0.05, Inf)
-mafbin.labs <- c('< 0.05%', '0.05% to 0.1%', '0.1% to 0.5%',
-                 '0.5% to 1%', '1% to 2%', '2% to 5%', '> 5%')
-dat %<>% mutate(maf.cat = cut(MAF, breaks = mafbin.break,
-                              labels = mafbin.labs))
+mafbin_break <- c(-Inf, 0.0005, 0.001, 0.005, 0.01, 0.02, 0.05, Inf)
+mafbin_labs <- c("< 0.05%", "0.05% to 0.1%", "0.1% to 0.5%",
+                 "0.5% to 1%", "1% to 2%", "2% to 5%", "> 5%")
+dat %<>% mutate(maf.cat = cut(MAF, breaks = mafbin_break,
+                              labels = mafbin_labs))
 
 # Relevel CHR
 dat$CHR <- factor(str_replace(dat$CHR, "^chr", ""),
                   levels = c(1:22), labels = c(1:22))
 
 ## calculate number of typed/imputed SNPs
-imputed.snps <- length(dat[dat$Genotyped == 'Imputed',]$SNP)
-typed.snps <- length(dat[dat$Genotyped == 'Genotyped',]$SNP)
+snps_imputed <- length(dat[dat$Genotyped == "Imputed", ]$SNP)
+snps_typed <- length(dat[dat$Genotyped == "Genotyped", ]$SNP)
 
 ##  Subsample either the set number of imputed and genotyped SNPs
 ##    OR if less then the set number of SNPs avalibe, all SNPs
-sampsize = snakemake@params[["sampsize"]]
-datImput.smallsamp <- dat %>%
-  filter(Genotyped == 'Imputed') %>%
+sampsize <- snakemake@params[["sampsize"]]
+dat_smallsamp_imputed <- dat %>%
+  filter(Genotyped == "Imputed") %>%
   group_by(CHR) %>%
-  sample_frac(min(1, sampsize/imputed.snps), replace = F) %>%
+  sample_frac(min(1, sampsize / snps_imputed), replace = FALSE) %>%
   # Don't use number greater than 1 if sample size is greater than the
   # actual number of SNPs.
   ungroup()
-datTyped.smallsamp <- dat %>%
-  filter(Genotyped == 'Genotyped') %>%
-  group_by(CHR) %>%
-  sample_frac(min(1, sampsize/typed.snps), replace = F) %>%
-  ungroup()
-dat.smallsamp <- datImput.smallsamp %>%
-   bind_rows(datTyped.smallsamp) %>%
-   arrange(CHR, POS)
 
-## save dataframe to disk
-# write_feather(dat.smallsamp, "df.feather")
+dat_smallsamp_typed <- dat %>%
+  filter(Genotyped == "Genotyped") %>%
+  group_by(CHR) %>%
+  sample_frac(min(1, sampsize / snps_typed), replace = FALSE) %>%
+  ungroup()
+
+dat_smallsamp <- dat_smallsamp_imputed %>%
+   bind_rows(dat_smallsamp_typed) %>%
+   arrange(CHR, POS)
 ```
 
 ```{r data tabulation, echo=FALSE}
 ##---- Data Tabulation ----##
 ##  total number of imputed SNPs per chromosome
-dat.out <- dat %>%
-  mutate(Pass_R2_Common = Rsq >= snakemake@params[["rsq"]] & MAF >= snakemake@params[["maf"]]) %>%
+dat_out <- dat %>%
+  mutate(Pass_R2_Common = (Rsq >= snakemake@params[["rsq"]] &
+                           MAF >= snakemake@params[["maf"]])) %>%
   mutate(Pass_typed = Genotyped == "Genotyped")
 
-if ( no_rsq2 ) {
-  dat.out %<>%
+if (no_rsq2) {
+  dat_out %<>%
     mutate(Pass_MAF = MAF >= snakemake@params[["maf"]]) %>%
     mutate(included = (Pass_R2_Common & Pass_MAF) | Pass_typed)
 } else {
-  dat.out %<>%
-    mutate(Pass_R2_Rare = Rsq >= snakemake@params[["rsq2"]] & MAF < snakemake@params[["maf"]]) %>%
-    mutate(included = Pass_R2_Rare | Pass_R2_Common | Pass_typed)
+  dat_out %<>%
+    mutate(Pass_R2_Rare = (Rsq >= snakemake@params[["rsq2"]] &
+                           MAF < snakemake@params[["maf"]]),
+           included = Pass_R2_Rare | Pass_R2_Common | Pass_typed)
 }
 
-tested.n <- dat.out %>%
+n_tested <- dat_out %>%
   select(Rsq, MAF, CHR) %>%
   filter_all(all_vars(!is.na(.))) %>%
   group_by(CHR) %>%
   group_size()
 
-dat.out %<>%
+dat_out %<>%
   select(-EmpRsq, -maf.cat) %>%
   filter_all(all_vars(!is.na(.))) %>%
-  select(CHR, matches("Pass_R2_Rare|Pass_MAF"), Pass_R2_Common, Pass_typed, included) %>%
+  select(CHR, matches("Pass_R2_Rare|Pass_MAF"),
+         Pass_R2_Common, Pass_typed, included) %>%
   group_by(CHR) %>%
   summarise_all(sum) %>%
   ungroup() %>%
-  add_column(n = tested.n, .after = 1) %>%
+  add_column(n = n_tested, .after = 1) %>%
   mutate(CHR = as.character(CHR))
 
-dat.out %<>%
-  bind_rows(summarise_all(select(dat.out, -CHR), mean)) %>%
-  bind_rows(summarise_all(select(dat.out, -CHR), sum))
-dat.out[nrow(dat.out), "CHR"] <- "Total"
-dat.out[nrow(dat.out)-1, "CHR"] <- "Mean"
+dat_out %<>%
+  bind_rows(summarise_all(select(dat_out, -CHR), mean)) %>%
+  bind_rows(summarise_all(select(dat_out, -CHR), sum))
+dat_out[nrow(dat_out), "CHR"] <- "Total"
+dat_out[nrow(dat_out) - 1, "CHR"] <- "Mean"
 
-dat.out %<>%
-  mutate(n = prettyNum(n, big.mark=",", preserve.width="none")) %>%
-  mutate(Pass_R2_Common = prettyNum(Pass_R2_Common, big.mark=",", preserve.width="none")) %>%
-  mutate(Pass_typed = prettyNum(Pass_typed, big.mark=",", preserve.width="none")) %>%
-  mutate(included = prettyNum(included, big.mark=",", preserve.width="none"))
+format_number <- function(x) {
+  prettyNum(x, big.mark = ",", preserve.width = "none")
+}
 
+dat_out %<>%
+  mutate(n = format_number(n),
+         Pass_R2_Common = format_number(Pass_R2_Common),
+         Pass_typed = format_number(Pass_typed),
+         included = format_number(included))
 
-
-if ( no_rsq2 ) {
-  dat.out %<>%
+if (no_rsq2) {
+  dat_out %<>%
     rename(Pass_R2 = Pass_R2_Common) %>%
-    mutate(Pass_MAF = prettyNum(Pass_MAF, big.mark=",", preserve.width="none"))
+    mutate(Pass_MAF = format_number(Pass_MAF))
 } else {
-  dat.out %<>%
-    mutate(Pass_R2_Rare = prettyNum(Pass_R2_Rare, big.mark=",", preserve.width="none"))
+  dat_out %<>%
+    mutate(Pass_R2_Rare = format_number(Pass_R2_Rare))
 }
 
 ## save the table to disk
 cohort_file <- str_replace(snakemake@params[["cohort"]], " ", "_")
-write_csv(dat.out, paste0(snakemake@params[["output_dir"]], '/SNPcount', cohort_file, '.csv'))
+out_snpcounts <-
+  paste0(snakemake@params[["output_dir"]], "/SNPcount", cohort_file, ".csv")
+write_csv(dat_out, out_snpcounts)
 ```
 
 ## Number of SNPs in datasets
@@ -212,47 +225,58 @@ The following table displays the number of imputed SNPs present in the GWAS, per
 
 ```{r kable, echo=FALSE}
 
-dat.out %>%
-  knitr::kable(format = 'html', align = 'lrrrr', caption = 'Number of imputed SNPs, pre and post filtering') %>%
-  kable_styling(full_width = F, position = "center")
+dat_out %>%
+  knitr::kable(format = "html", align = "lrrrr",
+               caption = "Number of imputed SNPs, pre and post filtering") %>%
+  kable_styling(full_width = FALSE, position = "center")
 
 ```
 ## Overall distribution of imputation quality
 
 The following histogram is of imputation quality scores ($\hat{r}^2$) for all chromosomes and positions. The different colors represent different chromosomes.
 
-```{r quality_distribution, warning=FALSE, echo = FALSE, fig.width=7.5, fig.height=4.7, fig.align='center'}
+```{r quality_distribution, warning=FALSE, echo = FALSE, fig.width=7.5, fig.height=4.7, fig.align="center"}
 ##  Plot histogram of info score distribution
-ggplot(data = dat, aes(x = Rsq, fill = CHR)) + geom_histogram(binwidth = 0.01) +
-  scale_x_continuous(expand = c(0,0)) + scale_y_continuous(labels = comma, expand=c(0,0)) +
-  geom_vline(xintercept = rsqs, colour = 'red', linetype = 2) + theme_bw() +
-  labs(title = paste0(snakemake@params[["cohort"]], ': Distribution of imputation quality scores'), x = bquote('Quality ('~R^2~')'))
+ggplot(data = dat, aes(x = Rsq, fill = CHR)) +
+  geom_histogram(binwidth = 0.01) +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(labels = comma, expand=c(0, 0)) +
+  geom_vline(xintercept = rsqs, colour = "red", linetype = 2) +
+  theme_bw() +
+  labs(title = paste0(snakemake@params[["cohort"]],
+                      ": Distribution of imputation quality scores"),
+       x = bquote("Quality ("~R^2~")"))
 ```
 
 ## Imputation quality in MAF ranges.
 
 The following violin plots show the distribution of the imputation quality scores ($\hat{r}^2$) for all chromosomes and positions in several ranges of MAF from ultra-rare to common. This shows the minimum MAF you can use in your analyses and the general quality of the imputation, as well as any unusual distributions of quality.
 
-```{r quality_mafbins, warning=FALSE, echo = FALSE, fig.width=7.5, fig.height=4.7, fig.align='center'}
+```{r quality_mafbins, warning=FALSE, echo = FALSE, fig.width=7.5, fig.height=4.7, fig.align="center"}
 ##  Plot distribution of Rsq by MAF bins
-ggplot(dat, aes(x = maf.cat, y = Rsq, fill = maf.cat)) + theme_bw() +
-  geom_violin(alpha = 0.75, scale = 'width', draw_quantiles = 1) +
-  geom_boxplot(width = 0.1, fill = 'white', outlier.size = 0.1) +
-  scale_fill_brewer(palette = 'Set1') + theme(legend.position = 'none') +
-  labs(title = paste0(snakemake@params[["cohort"]], ': Distribution of Quality score by MAF '),
-  x = 'MAF',
-  y = bquote('Quality ('~R^2~')'))
+ggplot(dat, aes(x = maf.cat, y = Rsq, fill = maf.cat)) +
+  geom_violin(alpha = 0.75, scale = "width", draw_quantiles = 1) +
+  geom_boxplot(width = 0.1, fill = "white", outlier.size = 0.1) +
+  scale_fill_brewer(palette = "Set1") + theme(legend.position = "none") +
+  theme_bw() +
+  labs(title = paste0(snakemake@params[["cohort"]],
+                      ": Distribution of Quality score by MAF "),
+       x = "MAF",
+       y = bquote("Quality ("~R^2~")"))
 ```
 
 ```{r kable maf_bins, echo=FALSE}
 dat %>%
   group_by(maf.cat) %>%
-  summarise(n(), mean(Rsq, na.rm = T), sd(Rsq, na.rm = T)) %>%
-  rename('MAF Category' = maf.cat, n = 'n()', 'mean rsq' = 'mean(Rsq, na.rm = T)', 'sd rsq' = 'sd(Rsq, na.rm = T)') %>%
-  mutate(n = prettyNum(n, big.mark=",", preserve.width="none")) %>%
+  summarise(n(), mean(Rsq, na.rm = TRUE), sd(Rsq, na.rm = TRUE)) %>%
+  rename("MAF Category" = maf.cat, n = "n()",
+         "mean rsq" = "mean(Rsq, na.rm = T)",
+         "sd rsq" = "sd(Rsq, na.rm = T)") %>%
+  mutate(n = format_number(n)) %>%
   mutate_if(is.numeric, ~round(., 2)) %>%
-  knitr::kable(format = 'html', align = 'lrcc', caption = 'Number of imputed per MAF bin and mean rsq') %>%
-  kable_styling(full_width = F, position = "center")
+  knitr::kable(format = "html", align = "lrcc",
+    caption = "Number of imputed per MAF bin and mean rsq") %>%
+  kable_styling(full_width = FALSE, position = "center")
 
 ```
 
@@ -260,16 +284,20 @@ dat %>%
 
 The following scatter-plots show imputation quality scores ($\hat{r}^2$), plotted against position on each chromosome for aproxmitaly `r samp_pretty` imputed and `r samp_pretty` genotyped SNPs across the genome. This can be used to find gaps in imputation (there should only be gaps for the centromeres) or local dips in imputation qualtity.
 
-```{r quality_pos, warning=FALSE, echo = FALSE, fig.width=7.5, fig.height=5.7, fig.align='center'}
+```{r quality_pos, warning=FALSE, echo = FALSE, fig.width=7.5, fig.height=5.7, fig.align="center"}
 ## Plot Infoscore by genomic position
- ggplot(data = dat.smallsamp, aes(x = POS, y = Rsq)) + geom_point(size = 0.1, alpha = 0.5) +
-  geom_hline(yintercept = rsqs, colour = 'red', linetype = 1) +
-  scale_x_continuous(expand = c(0,0)) + scale_y_continuous(expand=c(0,0)) +
+ ggplot(data = dat_smallsamp, aes(x = POS, y = Rsq)) +
+  geom_point(size = 0.1, alpha = 0.5) +
+  geom_hline(yintercept = rsqs, colour = "red", linetype = 1) +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand=c(0, 0)) +
   facet_wrap(~CHR, scales = "free") +
-  theme_classic() + theme(axis.text.x=element_blank(), axis.ticks.x=element_blank()) +
-  labs(title = paste0(snakemake@params[["cohort"]], ': Quality score by genomic position'),
-  x = 'Genomic Position',
-  y = bquote('Quality ('~R^2~')'))
+  theme_classic() +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+  labs(title = paste0(snakemake@params[["cohort"]],
+                      ": Quality score by genomic position"),
+       x = "Genomic Position",
+       y = bquote("Quality ("~R^2~")"))
 ```
 
 ## MAF vs. Quality Score
@@ -284,33 +312,44 @@ where $\hat{p}$ is alternate allele frequency, $D_i$ is the imputed posterior pr
 
 Imputed SNPs are black, and typed SNPs are red. Approximately `r samp_pretty` imputed and `r samp_pretty` genotyped SNPs have been subsampled for the plot.
 
-```{r quality_maf, warning=FALSE, echo = FALSE, fig.width=7.5, fig.height=4.7, fig.align='center'}
+```{r quality_maf, warning=FALSE, echo = FALSE, fig.width=7.5, fig.height=4.7, fig.align="center"}
 ##  Plot info score vs MAF
 
-plt <- dat.smallsamp %>%
+plt <- dat_smallsamp %>%
   filter(Genotyped == "Genotyped") %>%
   rename(Quality = EmpRsq, Type = Genotyped) %>%
   select(MAF, Quality, SNP, Type)
-plt <- dat.smallsamp %>%
+plt <- dat_smallsamp %>%
   filter(Genotyped == "Imputed") %>%
   rename(Quality = Rsq, Type = Genotyped) %>%
   select(MAF, Quality, SNP, Type) %>%
   bind_rows(plt)
 
 ggplot() +
-  geom_point(data = plt, aes(x = MAF, y = Quality, color = Type), size = 0.1, alpha = 0.3) +
+  geom_point(data = plt,
+             aes(x = MAF, y = Quality, color = Type),
+             size = 0.1, alpha = 0.3) +
   scale_x_log10(breaks = scales::trans_breaks("log10", function(x) 10^x),
-   labels = scales::trans_format("log10", scales::math_format(10^.x)), limits = c(0.00001, 0.5), expand=c(0,0)) +
-  scale_y_continuous(sec.axis = sec_axis(~ . +0, name = bquote('Concordance (Emperical '~R^2~')')), limits = c(0, 1), expand=c(0,0)) +
-  geom_vline(xintercept = snakemake@params[["maf"]], colour = 'blue', linetype = 2) +
-  geom_hline(yintercept = rsqs, colour = 'red', linetype = 2) +
-  theme_bw() + labs(title = paste0(snakemake@params[["cohort"]], ': Quality score by MAF'), y = bquote('Quality ('~R^2~')')) +
-  scale_colour_manual(name = 'SNPs', values = c('Imputed'='black','Genotyped'='red'), guide = 'legend') +
-  guides(colour = guide_legend(override.aes = list(size = 1))) + theme(legend.position = 'bottom') + annotation_logticks()
+    labels = scales::trans_format("log10", scales::math_format(10^.x)),
+    limits = c(0.00001, 0.5), expand = c(0, 0)) +
+  scale_y_continuous(sec.axis = sec_axis(~ . +0,
+                     name = bquote("Concordance (Emperical "~R^2~")")),
+                     limits = c(0, 1), expand = c(0, 0)) +
+  geom_vline(xintercept = snakemake@params[["maf"]],
+             colour = "blue", linetype = 2) +
+  geom_hline(yintercept = rsqs, colour = "red", linetype = 2) +
+  theme_bw() +
+  labs(title = paste0(snakemake@params[["cohort"]], ": Quality score by MAF"),
+       y = bquote("Quality ("~R^2~")")) +
+  scale_colour_manual(name = "SNPs", guide = "legend",
+                      values = c("Imputed" = "black", "Genotyped" = "red")) +
+  guides(colour = guide_legend(override.aes = list(size = 1))) +
+  theme(legend.position = "bottom") +
+  annotation_logticks()
 ```
 
 
-```{R conditional_block_py, echo=FALSE, results='asis', eval=FALSE}
+```{R conditional_block_py, echo=FALSE, results="asis", eval=FALSE}
 cat(sprintf("## MAF vs. Quality Score (interactive)
 
 Below is an interactive version of the same plot, with approximately %s Genotyped SNPs and %s Imputed SNPs subsampled. You can zoom in and out, and you can mouse over individual variants for more information.
@@ -321,21 +360,23 @@ Below is an interactive version of the same plot, with approximately %s Genotype
 ```{r ggploty, eval=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
 library(plotly)
 fig <- plt %>% plot_ly(x = ~MAF, y = ~Quality, color = ~Type,
-  type="scatter", mode="markers",
+  type = "scatter", mode = "markers",
   marker = list(size = 3, opacity = 0.3),
-  colors = c('red', 'black'), hoverinfo = "text+name",
-  text = ~sprintf('MAF: %f\n%s: %f\nSNP: %s',
+  colors = c("red", "black"), hoverinfo = "text+name",
+  text = ~sprintf("MAF: %f\n%s: %f\nSNP: %s",
       MAF, if_else(Type == "Genotyped", "Empirical R²", "R²"), Quality, SNP),
   height = 600) %>%
   layout(title = paste0(snakemake@params[["cohort"]], ": Quality score by MAF"),
-         xaxis = list(type = "log", range = c(-5, -0.3), title = "Minor Allele Frequency (MAF)"),
-         yaxis = list(range = c(0, 1), title = "Quality (R² for Imputed; Empirical R² for Typed)"),
-         legend = list(orientation = 'h')) %>%
+         xaxis = list(type = "log", range = c(-5, -0.3),
+                      title = "Minor Allele Frequency (MAF)"),
+         yaxis = list(range = c(0, 1),
+            title = "Quality (R² for Imputed; Empirical R² for Typed)"),
+         legend = list(orientation = "h")) %>%
   config(sendData = FALSE, displaylogo = FALSE,
-         modeBarButtonsToRemove = list("sendDataToCloud", "lasso2d", "toImage", "autoScale2d")) %>%
+         modeBarButtonsToRemove = list("sendDataToCloud", "lasso2d",
+           "toImage", "autoScale2d")) %>%
   toWebGL()
 
 shiny::div(
-  style ="height:600;width:100%;border:none;margin:auto;display:block;", fig)
-
+  style = "height:600;width:100%;border:none;margin:auto;display:block;", fig)
 ```
