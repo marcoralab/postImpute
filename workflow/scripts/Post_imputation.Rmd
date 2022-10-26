@@ -22,14 +22,17 @@ knitr::opts_knit$set(root.dir = snakemake@params[["rwd"]])
 ##---- Requried Pacakges ----##
 suppressPackageStartupMessages(library(dplyr)) ## data wrangling
 library(tidyr)
+library(tibble)
 library(ggplot2)    ## plotting
 library(scales)     ## for using commas on ggplot scales
 ## displaing tables nicly in html
 suppressPackageStartupMessages(library(kableExtra))
 library(stringr)    ## replace substring for file output
 suppressPackageStartupMessages(library(magrittr))
+suppressPackageStartupMessages(library(purrr))
 library(furrr)
 library(httr)
+library(readr)
 
 no_rsq2 <- (is.na(snakemake@params[["rsq2"]]) ||
             snakemake@params[["rsq2"]] == "NA")
@@ -113,7 +116,7 @@ if (snakemake@params[["reading"]] == "P") {
   plan(sequential())
 }
 
-dat <- future_map(path_files, read_info)
+dat <- future_map_dfr(path_files, read_info)
 
 # create new varible with MAF bins
 mafbin_break <- c(-Inf, 0.0005, 0.001, 0.005, 0.01, 0.02, 0.05, Inf)
@@ -185,7 +188,7 @@ dat_out %<>%
   group_by(CHR) %>%
   summarise_all(sum) %>%
   ungroup() %>%
-  add_column(n = n_tested, .after = 1) %>%
+  tibble::add_column(n = n_tested, .after = 1) %>%
   mutate(CHR = as.character(CHR))
 
 dat_out %<>%
@@ -266,12 +269,13 @@ ggplot(dat, aes(x = maf.cat, y = Rsq, fill = maf.cat)) +
 ```
 
 ```{r kable maf_bins, echo=FALSE}
+
 dat %>%
   group_by(maf.cat) %>%
-  summarise(n(), mean(Rsq, na.rm = TRUE), sd(Rsq, na.rm = TRUE)) %>%
-  rename("MAF Category" = maf.cat, n = "n()",
-         "mean rsq" = "mean(Rsq, na.rm = T)",
-         "sd rsq" = "sd(Rsq, na.rm = T)") %>%
+  summarise(n = n(),
+            "mean rsq" = mean(Rsq, na.rm = TRUE),
+            "sd rsq" = sd(Rsq, na.rm = TRUE)) %>%
+  rename("MAF Category" = maf.cat) %>%
   mutate(n = format_number(n)) %>%
   mutate_if(is.numeric, ~round(., 2)) %>%
   knitr::kable(format = "html", align = "lrcc",
