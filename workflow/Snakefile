@@ -189,7 +189,7 @@ rule stats:
     conda: "envs/r_stats.yaml"
     threads: 22
     resources:
-        mem_mb = 24000,
+        mem_mb = 4000,
         walltime = '8:00'
     script: "scripts/Post_imputation.Rmd"
 
