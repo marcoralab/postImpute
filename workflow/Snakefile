@@ -61,8 +61,16 @@ sampfilt = build_sampfilt_vcf(config)
 
 # --- Process input files from config ---
 
+if 'validate_inputs' not in config:
+    validate_inputs = True
+elif config['validate_inputs'] in [True, False]:
+    validate_inputs = config['validate_inputs']
+else:
+    raise Exception(
+        'Invalid value {} for validate_inputs.'.format(
+          config['validate_inputs']))
 
-def build_samp(in_path, samples=None):
+def build_samp(in_path, samples=None, validate=True):
     basename = lambda x: os.path.basename(x)
     p = [directory for directory, y, files in os.walk(in_path)
          if any(".zip" in f for f in files)]
@@ -70,9 +78,13 @@ def build_samp(in_path, samples=None):
         p = [directory for directory,y,files in os.walk(in_path)
              if any("info.gz" in f for f in files)]
     if samples is not None:
-        if not p:
-            return samples
-        return [basename(x) for x in p if basename(x) in samples]
+        overlap = [basename(x) for x in p if basename(x) in samples]
+        missing = [x for x in samples if x not in overlap]
+        if validate and missing:
+            raise Exception(
+                'Files for the following samples are missing: {}'.format(
+                    ', '.join(missing)))
+        return samples
     return [basename(x) for x in p]
 
 
@@ -80,9 +92,9 @@ INPATH = os.path.normpath(config["directory_in"])    #  normalize input dir
 OUTPATH = os.path.normpath(config["directory_out"])  #  normalize out dir
 
 if "SAMPLES" in config:
-    COHORT = build_samp(INPATH, [*config["SAMPLES"]])
+    COHORT = build_samp(INPATH, [*config["SAMPLES"]], validate = validate_inputs)
 elif "COHORT" in config:
-    COHORT = build_samp(INPATH, [*config["COHORT"]])
+    COHORT = build_samp(INPATH, [*config["COHORT"]], validate = validate_inputs)
 else:
     COHORT = build_samp(INPATH)
 
