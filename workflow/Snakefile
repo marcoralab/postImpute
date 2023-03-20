@@ -32,7 +32,7 @@ def parse_chrom(chrs):
     return parsed
 
 
-if 'chrom' not in config:
+if 'chroms' not in config:
     CHROM = parse_chrom('1:22')
 else:
     CHROM = parse_chrom(config['chroms'])
@@ -145,7 +145,7 @@ rule all:
 
 if zipped:
     rule unzip:
-        input: "{cohort}/chr_{chrom}.zip"
+        input: INPATH + "/{cohort}/chr_{chrom}.zip"
         output:
             vcf = "{impute_dir}/input/{cohort}/chr{chrom}.dose.vcf.gz",
             info = "{impute_dir}/input/{cohort}/chr{chrom}.info.gz"
