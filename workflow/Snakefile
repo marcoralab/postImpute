@@ -37,25 +37,37 @@ if 'chroms' not in config:
 else:
     CHROM = parse_chrom(config['chroms'])
 
+def val_if_config(key, default=None):
+    if key in config:
+        return config[key]
+    return default
+
 # --- Process keep and remove ---
 
-
 def build_sampfilt_vcf(config):
-    def filtstr(x):
-        if not (x in config and config[x] and config[x] is not None):
-            return None
-        elif os.path.isfile(config[x]):
-            paramstr = '' if x == 'include_samp' else '^'
-            return '{}{}'.format(paramstr, os.path.normpath(config[x]))
-        else:
-            filt = 'inclusion' if x == 'include_samp' else 'exclusion'
-            raise Exception("Invalid {} list: {}.".format(filt, config[x]))
-    x = [filtstr(x) for x in ['include_samp', 'exclude_samp']]
-    x = [i for i in x if i is not None]
-    if len(x) > 1:
+    include_samp = val_if_config('include_samp', '')
+    exclude_samp = val_if_config('exclude_samp', '')
+    if not include_samp and not exclude_samp:
+        return None
+    elif include_samp and exclude_samp:
         raise Exception('Cannot have both sample removal and exclusion.')
-    return 'bcftools view --samples-file ' + x[0] if x else ''
+    elif include_samp:
+        paramstr = os.path.normpath(include_samp)
+    else:
+        paramstr = '^' + os.path.normpath(exclude_samp)
+    return f'bcftools view --samples-file {paramstr}'
 
+def select_sampfilt_file(config):
+    include_samp = val_if_config('include_samp', '')
+    exclude_samp = val_if_config('exclude_samp', '')
+    if not include_samp and not exclude_samp:
+        return []
+    elif include_samp and exclude_samp:
+        raise Exception('Cannot have both sample removal and exclusion.')
+    elif include_samp:
+        return os.path.normpath(include_samp)
+    else:
+        return os.path.normpath(exclude_samp)
 
 sampfilt = build_sampfilt_vcf(config)
 
@@ -100,8 +112,12 @@ else:
 
 # --- Done processing ---
 
-fixheaders = config['fixheaders'] if 'fixheaders' in config else True
-
+if 'imputePipeline' in in config and config['imputePipeline']:
+    fixheaders = False
+    minimac_version = val_if_config('minimac_version', '4')
+else:
+    fixheaders = config['fixheaders'] if 'fixheaders' in config else True
+    minimac_version = val_if_config('minimac_version', 'guess')
 
 def flatten(nested):
     flat = []
@@ -246,12 +262,37 @@ fi
 
 filter_out = "{impute_dir}/data/by_chrom/{cohort}_chr{chrom}_filtered.vcf.gz"
 
+if minimac_version == 'guess':
+    rule detect_minimac:
+        input: lambda wc: expand(startfile, cohort=wc['cohort'], chrom=CHROM[0])
+        output: "{impute_dir}/data/{cohort}.minimacversion"
+        conda: "envs/detect_minimac.yaml"
+        threads: 1
+        resources:
+            mem_mb = 2048,
+            walltime = '24:00'
+        script: 'scripts/rule_detect_minimac.py'
+else:
+    rule detect_minimac:
+        input: lambda wc: expand(startfile, cohort=wc['cohort'], chrom=CHROM[0])
+        output: "{impute_dir}/data/{cohort}.minimacversion"
+        params:
+            ver = minimac_version
+        threads: 1
+        localrule: True
+        resources:
+            mem_mb = 2048,
+            walltime = '1:00'
+        shell: 'echo {params.ver} > {output}'
 
-if sampfilt:
+
+if sampfilt and minimac_version in ['guess', '3']:
     rule filters:
         input:
             vcf = rules.fixheaders.output.vcf if fixheaders else startfile,
-            tbi = rules.fixheaders.output.tbi if fixheaders else startfile + '.tbi'
+            tbi = rules.fixheaders.output.tbi if fixheaders else startfile + '.tbi',
+            sampfilt = lambda wc: select_sampfilt_file(config),
+            minimac_ver = "{impute_dir}/data/{cohort}.minimacversion"
         output: temp(filter_out)
         params:
             filt = qualfilt,
@@ -263,18 +304,76 @@ if sampfilt:
         conda: "envs/bcftools.yaml"
         shell:
             r'''
-if zcat {input.vcf} | head -n 4000 | grep -q "##INFO=<ID=IMPUTED"; then
+minimac_version=$(cat {input})
+if [[ $minimac_version == '4' ]]; then
   echo "Processing Minimac4 file"
   {params.sf} --force-samples -Oz --threads 8 {input.vcf} | \
   bcftools annotate -i "INFO/TYPED=1 || INFO/TYPED_ONLY=1 || {params.filt}" \
     -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8
-else
+elif [[ $minimac_version == '3' ]]; then
   echo "Processing Minimac3 file"
   {params.sf} --force-samples -Oz --threads 8 {input.vcf} | \
   bcftools annotate -i \
     "%FILTER='GENOTYPED' || %FILTER='GENOTYPED_ONLY' || {params.filt}" \
     -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8
+else
+    echo minimac not recognized
+    exit 1
 fi'''
+
+elif minimac_version in ['guess', '3']:
+    rule filters:
+        input:
+            vcf = rules.fixheaders.output.vcf if fixheaders else startfile,
+            tbi = rules.fixheaders.output.tbi if fixheaders else startfile + '.tbi'
+            minimac_ver = "{impute_dir}/data/{cohort}.minimacversion"
+        output: temp(filter_out)
+        params:
+            filt = qualfilt
+        threads: 8
+        resources:
+            mem_mb = 256,
+            walltime = '24:00'
+        conda: "envs/bcftools.yaml"
+        shell:
+            r'''
+minimac_version=$(cat {input})
+if [[ $minimac_version == '4' ]]; then
+  echo "Processing Minimac4 file"
+  bcftools annotate -i "INFO/TYPED=1 || INFO/TYPED_ONLY=1 || {params.filt}" \
+    -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8 {input.vcf}
+elif [[ $minimac_version == '3' ]]; then
+  echo "Processing Minimac3 file"
+  bcftools annotate -i \
+    "%FILTER='GENOTYPED' || %FILTER='GENOTYPED_ONLY' || {params.filt}" \
+    -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8 {input.vcf}
+else
+    echo minimac not recognized
+    exit 1
+fi'''
+
+elif sampfilt:
+    rule filters:
+        input:
+            vcf = startfile,
+            tbi = startfile + '.tbi',
+            sampfilt = lambda wc: select_sampfilt_file(config)
+        output: temp(filter_out)
+        params:
+            filt = qualfilt,
+            sf = sampfilt
+        threads: 8
+        resources:
+            mem_mb = 256,
+            walltime = '24:00'
+        conda: "envs/bcftools.yaml"
+        shell:
+            r'''
+echo "Processing Minimac4 file"
+{params.sf} --force-samples -Oz --threads 8 {input.vcf} | \
+bcftools annotate -i "INFO/TYPED=1 || INFO/TYPED_ONLY=1 || {params.filt}" \
+  -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8
+'''
 
 else:
     rule filters:
@@ -291,16 +390,10 @@ else:
         conda: "envs/bcftools.yaml"
         shell:
             r'''
-if zcat {input.vcf} | head -n 4000 | grep -q "##INFO=<ID=IMPUTED"; then
-  echo "Processing Minimac4 file"
-  bcftools annotate -i "INFO/TYPED=1 || INFO/TYPED_ONLY=1 || {params.filt}" \
-    -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8 {input.vcf}
-else
-  echo "Processing Minimac3 file"
-  bcftools annotate -i \
-    "%FILTER='GENOTYPED' || %FILTER='GENOTYPED_ONLY' || {params.filt}" \
-    -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8 {input.vcf}
-fi'''
+echo "Processing Minimac4 file"
+bcftools annotate -i "INFO/TYPED=1 || INFO/TYPED_ONLY=1 || {params.filt}" \
+  -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8 {input.vcf}
+'''
 
 # defaults for renaming:
 renamed_cat = "{{impute_dir}}/data/by_chrom/{{cohort}}_chr{chrom}_filtered.vcf.gz"
