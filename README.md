@@ -81,6 +81,12 @@ You can also include OR exclude samples by a named list file using one of the fo
 
 `include_samp` accepts a space/tab-delimited text file with vcf IDs in the first column and optional sex in the second column, and removes all unlisted samples from the current analysis. `exclude_samp` does the same for all *listed* samples.
 
+#### Minimac Version
+
+This pipeline will automatically detect whether minimac3 or minimac4 was used by default when run independantly and assume minimac4 when run as part of imputePipeline. You can override this behavior by setting `minimac_version`.
+
+Options are `3`, `4` or `guess`.
+
 ### Running
 
 You must run the pipeline with Anaconda environments and Singularity enabled. You can either use a Snakemake profile to do so or run the pipeline with the following command:
