@@ -112,7 +112,7 @@ else:
 
 # --- Done processing ---
 
-if 'imputePipeline' in in config and config['imputePipeline']:
+if 'imputePipeline' in config and config['imputePipeline']:
     fixheaders = False
     minimac_version = val_if_config('minimac_version', '4')
 else:
@@ -325,7 +325,7 @@ elif minimac_version in ['guess', '3']:
     rule filters:
         input:
             vcf = rules.fixheaders.output.vcf if fixheaders else startfile,
-            tbi = rules.fixheaders.output.tbi if fixheaders else startfile + '.tbi'
+            tbi = rules.fixheaders.output.tbi if fixheaders else startfile + '.tbi',
             minimac_ver = "{impute_dir}/data/{cohort}.minimacversion"
         output: temp(filter_out)
         params:
