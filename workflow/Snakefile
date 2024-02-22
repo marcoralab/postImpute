@@ -48,7 +48,7 @@ def build_sampfilt_vcf(config):
     include_samp = val_if_config('include_samp', '')
     exclude_samp = val_if_config('exclude_samp', '')
     if not include_samp and not exclude_samp:
-        return None
+        return ''
     elif include_samp and exclude_samp:
         raise Exception('Cannot have both sample removal and exclusion.')
     elif include_samp:
@@ -357,7 +357,7 @@ elif sampfilt:
         input:
             vcf = startfile,
             tbi = startfile + '.tbi',
-            sampfilt = lambda wc: select_sampfilt_file(config)
+            sampfilt = select_sampfilt_file(config)
         output: temp(filter_out)
         params:
             filt = qualfilt,
