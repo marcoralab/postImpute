@@ -476,7 +476,7 @@ rule concat_chroms_samp:
         mem_mb = 512,
         walltime = '24:00'
     conda: "envs/bcftools.yaml"
-    shell: "bcftools concat -o {output} -Oz --threads 8 {input}"
+    shell: "bcftools concat --threads 8 {input} | bcftools norm -d none -o {output} -Oz"
 
 rule index_samples_chrom:
     input: renamed
@@ -498,7 +498,7 @@ rule merge_samples_chrom:
         mem_mb = 2000,
         walltime = "36:00"
     conda: "envs/bcftools.yaml"
-    shell: "bcftools merge -m none -o {output} -Oz --threads 8 {input.vcf}"
+    shell: "bcftools merge -m none --threads 8 {input.vcf} | bcftools norm -d none -o {output} -Oz"
 
 rule concat_chroms_all:
     input: expand("{{impute_dir}}/data/by_chrom/all_chr{chrom}_filtered.vcf.gz", chrom=CHROM)
@@ -522,7 +522,7 @@ rule make_plink_all:
         walltime = "96:00"
     conda: "envs/plink.yaml"
     shell:
-        "plink --keep-allele-order --vcf {input} {params.ID} --memory 10000 --threads 10 --make-bed "
+        "plink --keep-allele-order --vcf {input} {params.ID} --memory 20000 --threads 10 --make-bed "
         "--out {params.out_plink}"
 
 rule make_plink_samp:
@@ -533,11 +533,11 @@ rule make_plink_samp:
         ID = "--id-delim" if automap_tf else "--double-id "
     threads: 10
     resources:
-        mem_mb = 1000,
+        mem_mb = 2000,
         walltime = "2:00"
     conda: "envs/plink.yaml"
     shell:
-        "plink --keep-allele-order --vcf {input} {params.ID} --memory 10000 --threads 10 --make-bed "
+        "plink --keep-allele-order --vcf {input} {params.ID} --memory 20000 --threads 10 --make-bed "
         "--out {params.out_plink}"
 
 # If bgen outputs are requested

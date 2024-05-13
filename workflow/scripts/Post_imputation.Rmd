@@ -55,7 +55,23 @@ chr_parse <- function(chr_arg) {
   chrom <- c()
   for (i in chr_arg) {
     ii <- unlist(strsplit(i, ":"))
-    chrom <- append(chrom, ii[1]:ii[length(ii)])
+    if (length(ii) == 1) {
+      chrom <- append(chrom, ii)
+      next
+    } else if (length(ii) != 2) {
+      stop("Invalid chromosome range (too many ':')")
+    } else if (!grepl("^[0-9]+$", ii[1]) || !grepl("^[0-9]+$", ii[2])) {
+      stop("Invalid chromosome range (must be integers)")
+    } else if (as.numeric(ii[1]) > as.numeric(ii[2])) {
+      stop("Invalid chromosome range (start > end)")
+    } else if (as.numeric(ii[1]) < 1 || as.numeric(ii[2]) > 22) {
+      stop("Invalid chromosome range (out of bounds)")
+    } else if (as.numeric(ii[1]) == as.numeric(ii[2])) {
+      chrom <- append(chrom, ii[1])
+      next
+    } else {
+      chrom <- append(chrom, ii[1]:ii[length(ii)])
+    }
   }
   return(chrom)
 }
