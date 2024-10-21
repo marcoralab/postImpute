@@ -103,9 +103,48 @@ choose_files <- function(path, chrom) {
 files <- choose_files(snakemake@params[["path"]],
                       chr_parse(snakemake@params[["chrom"]]))
 
+pivot_kv_pairs <- function(df, ..., sep_field = ",", sep_kv = "=") {
+  dfcols <- colnames(df)
+
+  parse_pivot <- function(x) {
+    if (all(str_detect(na.exclude(x), "TRUE"))) {
+      readr::parse_logical(replace_na(x, "FALSE"))
+    } else {
+      readr::parse_guess(x)
+    }
+  }
+
+  df %>%
+    separate_rows(..., sep = sep_field) %>%
+    separate(..., into = c("key", "value"), sep = sep_kv, fill = "right") %>%
+    mutate(value = replace_na(value, "TRUE")) %>%
+    pivot_wider(names_from = key, values_from = value) %>%
+    mutate(across(!any_of(dfcols), parse_pivot))
+}
+
+proc_vcf <- function(vcf_df, pos) {
+  vcf_df %>%
+    rename(CHR = `#CHROM`) %>%
+    unite(SNP, c(CHR, POS, REF, ALT), sep = ":", remove = FALSE) %>%
+    pivot_kv_pairs(INFO, sep_field = ";") %>%
+    select(SNP, CHR, POS, MAF, Rsq = R2, EmpRsq = ER2, Genotyped = TYPED)
+}
+
+ct_vcf <- cols_only(`#CHROM` = "c", POS = "i", REF = "c", ALT = "c", INFO = "c")
+
 ##  Read info files into R
 read_info <- function(f) {
   message(sprintf("Loading %s...", f))
+  is_vcf <- read_lines(file = f, n_max = 1) %>%
+    str_detect("##fileformat=VCF")
+
+  if (is_vcf) {
+    ret <- f %>%
+      read_tsv_chunked(DataFrameCallback$new(proc_vcf), comment = "##",
+                       na = ".", chunk_size = 1e6, col_types = ct_vcf)
+    return(ret)
+  }
+
   #Read MAF, Rsq, and EmpRsq as numeric, replacing "-" with NA
   f %>%
     vroom::vroom(col_types = "cccnnnncnnncc", na = c("-")) %>%
@@ -122,10 +161,6 @@ read_info <- function(f) {
 
 path_files <- paste0(snakemake@params[["path"]], files)
 
-snakemake@wildcards[["cohort"]] %>%
-  paste0("_impStats.rda") %>%
-  save.image()
-
 if (snakemake@params[["reading"]] == "P") {
   plan(multicore(workers = 11))
 } else {
@@ -133,6 +168,15 @@ if (snakemake@params[["reading"]] == "P") {
 }
 
 dat <- future_map_dfr(path_files, read_info)
+
+if (is.logical(dat$Genotyped)) {
+  dat %<>%
+    mutate(Genotyped = case_when(
+      Genotyped == TRUE ~ "Genotyped",
+      Genotyped == FALSE ~ "Imputed",
+      TRUE ~ NA_character_
+    ))
+}
 
 # create new varible with MAF bins
 mafbin_break <- c(-Inf, 0.0005, 0.001, 0.005, 0.01, 0.02, 0.05, Inf)
@@ -150,7 +194,7 @@ snps_imputed <- length(dat[dat$Genotyped == "Imputed", ]$SNP)
 snps_typed <- length(dat[dat$Genotyped == "Genotyped", ]$SNP)
 
 ##  Subsample either the set number of imputed and genotyped SNPs
-##    OR if less then the set number of SNPs avalibe, all SNPs
+##    OR if less then the set number of SNPs available, all SNPs
 sampsize <- snakemake@params[["sampsize"]]
 dat_smallsamp_imputed <- dat %>%
   filter(Genotyped == "Imputed") %>%
@@ -167,8 +211,8 @@ dat_smallsamp_typed <- dat %>%
   ungroup()
 
 dat_smallsamp <- dat_smallsamp_imputed %>%
-   bind_rows(dat_smallsamp_typed) %>%
-   arrange(CHR, POS)
+  bind_rows(dat_smallsamp_typed) %>%
+  arrange(CHR, POS)
 ```
 
 ```{r data tabulation, echo=FALSE}
@@ -252,11 +296,23 @@ dat_out %>%
 ```
 ## Overall distribution of imputation quality
 
-The following histogram is of imputation quality scores ($\hat{r}^2$) for all chromosomes and positions. The different colors represent different chromosomes.
+The following table gives the number of variants per chromosome with no haplotype information ($\hat{r}^2 = 0$). The total number is `r format_number(sum(dat$Rsq == 0))`.
+
+```{r kable no info, echo=FALSE}
+dat %>%
+  filter(Rsq == 0) %>%
+  count(CHR) %>%
+  rename("Info-free Vars" = n) %>%
+  knitr::kable(format = "html", align = "rl",
+               caption = "Number of variants with no haplotype information") %>%
+  kable_styling(full_width = FALSE, position = "center")
+```
+
+The following histogram is of imputation quality scores ($\hat{r}^2$) for all chromosomes and positions. The different colors represent different chromosomes. Variants with no haplotype information are not shown.
 
 ```{r quality_distribution, warning=FALSE, echo = FALSE, fig.width=7.5, fig.height=4.7, fig.align="center"}
 ##  Plot histogram of info score distribution
-ggplot(data = dat, aes(x = Rsq, fill = CHR)) +
+ggplot(data = filter(dat, Rsq != 0), aes(x = Rsq, fill = CHR)) +
   geom_histogram(binwidth = 0.01) +
   scale_x_continuous(expand = c(0, 0)) +
   scale_y_continuous(labels = comma, expand=c(0, 0)) +
@@ -269,7 +325,7 @@ ggplot(data = dat, aes(x = Rsq, fill = CHR)) +
 
 ## Imputation quality in MAF ranges.
 
-The following violin plots show the distribution of the imputation quality scores ($\hat{r}^2$) for all chromosomes and positions in several ranges of MAF from ultra-rare to common. This shows the minimum MAF you can use in your analyses and the general quality of the imputation, as well as any unusual distributions of quality.
+The following violin plot shows the distribution of the imputation quality scores ($\hat{r}^2$) for all chromosomes and positions in several ranges of MAF from ultra-rare to common. This shows the minimum MAF you can use in your analyses and the general quality of the imputation, as well as any unusual distributions of quality.
 
 ```{r quality_mafbins, warning=FALSE, echo = FALSE, fig.width=7.5, fig.height=4.7, fig.align="center"}
 ##  Plot distribution of Rsq by MAF bins
@@ -285,7 +341,6 @@ ggplot(dat, aes(x = maf.cat, y = Rsq, fill = maf.cat)) +
 ```
 
 ```{r kable maf_bins, echo=FALSE}
-
 dat %>%
   group_by(maf.cat) %>%
   summarise(n = n(),
@@ -306,7 +361,7 @@ The following scatter-plots show imputation quality scores ($\hat{r}^2$), plotte
 
 ```{r quality_pos, warning=FALSE, echo = FALSE, fig.width=7.5, fig.height=5.7, fig.align="center"}
 ## Plot Infoscore by genomic position
- ggplot(data = dat_smallsamp, aes(x = POS, y = Rsq)) +
+ggplot(data = dat_smallsamp, aes(x = POS, y = Rsq)) +
   geom_point(size = 0.1, alpha = 0.5) +
   geom_hline(yintercept = rsqs, colour = "red", linetype = 1) +
   scale_x_continuous(expand = c(0, 0)) +

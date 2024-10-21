@@ -217,7 +217,7 @@ rule stats:
     conda: "envs/r_stats.yaml"
     threads: 22
     resources:
-        mem_mb = 4000,
+        mem_mb = 8000,
         walltime = '8:00'
     script: "scripts/Post_imputation.Rmd"
 
@@ -308,7 +308,7 @@ minimac_version=$(cat {input})
 if [[ $minimac_version == '4' ]]; then
   echo "Processing Minimac4 file"
   {params.sf} --force-samples -Oz --threads 8 {input.vcf} | \
-  bcftools annotate -i "INFO/TYPED=1 || INFO/TYPED_ONLY=1 || {params.filt}" \
+  bcftools annotate -i "INFO/TYPED=1 || {params.filt}" \
     -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8
 elif [[ $minimac_version == '3' ]]; then
   echo "Processing Minimac3 file"
@@ -340,7 +340,7 @@ elif minimac_version in ['guess', '3']:
 minimac_version=$(cat {input})
 if [[ $minimac_version == '4' ]]; then
   echo "Processing Minimac4 file"
-  bcftools annotate -i "INFO/TYPED=1 || INFO/TYPED_ONLY=1 || {params.filt}" \
+  bcftools annotate -i "INFO/TYPED=1 || {params.filt}" \
     -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8 {input.vcf}
 elif [[ $minimac_version == '3' ]]; then
   echo "Processing Minimac3 file"
@@ -371,7 +371,7 @@ elif sampfilt:
             r'''
 echo "Processing Minimac4 file"
 {params.sf} --force-samples -Oz --threads 8 {input.vcf} | \
-bcftools annotate -i "INFO/TYPED=1 || INFO/TYPED_ONLY=1 || {params.filt}" \
+bcftools annotate -i "INFO/TYPED=1 || {params.filt}" \
   -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8
 '''
 
@@ -391,7 +391,7 @@ else:
         shell:
             r'''
 echo "Processing Minimac4 file"
-bcftools annotate -i "INFO/TYPED=1 || INFO/TYPED_ONLY=1 || {params.filt}" \
+bcftools annotate -i "INFO/TYPED=1 || {params.filt}" \
   -Oz -o {output} --set-id '%CHROM:%POS:%REF:%ALT' --threads 8 {input.vcf}
 '''
 
