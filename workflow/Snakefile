@@ -218,7 +218,8 @@ rule stats:
     threads: 22
     resources:
         mem_mb = 4000,
-        walltime = '8:00'
+        #walltime = '8:00'
+        time_min = 480
     script: "scripts/Post_imputation.Rmd"
 
 # Sample filtering rules
@@ -244,7 +245,8 @@ rule fixheaders:
     threads: 1
     resources:
         mem_mb = 2048,
-        walltime = '24:00'
+        #walltime = '24:00'
+        time_min = 1440
     conda: "envs/bcftools.yaml"
     shell:
         r"""
@@ -270,7 +272,8 @@ if minimac_version == 'guess':
         threads: 1
         resources:
             mem_mb = 2048,
-            walltime = '24:00'
+            #walltime = '24:00'
+            time_min = 1440
         script: 'scripts/rule_detect_minimac.py'
 else:
     rule detect_minimac:
@@ -282,7 +285,8 @@ else:
         localrule: True
         resources:
             mem_mb = 2048,
-            walltime = '1:00'
+            #walltime = '1:00'
+            time_min = 60
         shell: 'echo {params.ver} > {output}'
 
 
@@ -300,7 +304,8 @@ if sampfilt and minimac_version in ['guess', '3']:
         threads: 8
         resources:
             mem_mb = 256,
-            walltime = '24:00'
+            #walltime = '24:00'
+            time_min = 1440
         conda: "envs/bcftools.yaml"
         shell:
             r'''
@@ -333,7 +338,8 @@ elif minimac_version in ['guess', '3']:
         threads: 8
         resources:
             mem_mb = 256,
-            walltime = '24:00'
+           # walltime = '24:00'
+            time_min = 1440
         conda: "envs/bcftools.yaml"
         shell:
             r'''
@@ -365,7 +371,8 @@ elif sampfilt:
         threads: 8
         resources:
             mem_mb = 256,
-            walltime = '24:00'
+            #walltime = '24:00'
+            time_min = 1440
         conda: "envs/bcftools.yaml"
         shell:
             r'''
@@ -386,7 +393,8 @@ else:
         threads: 8
         resources:
             mem_mb = 256,
-            walltime = '24:00'
+            #walltime = '24:00'
+            time_min = 1440
         conda: "envs/bcftools.yaml"
         shell:
             r'''
@@ -474,7 +482,8 @@ rule concat_chroms_samp:
     threads: 8
     resources:
         mem_mb = 512,
-        walltime = '24:00'
+        #walltime = '24:00'
+        time_min = 1440
     conda: "envs/bcftools.yaml"
     shell: "bcftools concat -o {output} -Oz --threads 8 {input}"
 
@@ -496,7 +505,8 @@ rule merge_samples_chrom:
     threads: 8
     resources:
         mem_mb = 2000,
-        walltime = "36:00"
+        #walltime = "36:00"
+        time_min = 2160
     conda: "envs/bcftools.yaml"
     shell: "bcftools merge -m none -o {output} -Oz --threads 8 {input.vcf}"
 
@@ -506,7 +516,8 @@ rule concat_chroms_all:
     threads: 8
     resources:
         mem_mb = 256,
-        walltime = "24:00"
+        #walltime = "24:00"
+        time_min = 1440
     conda: "envs/bcftools.yaml"
     shell: "bcftools concat -o {output} -Oz --threads 8 {input}"
 
@@ -519,7 +530,8 @@ rule make_plink_all:
     threads: 10
     resources:
         mem_mb = 3000,
-        walltime = "96:00"
+        #walltime = "96:00"
+        time_min = 5760
     conda: "envs/plink.yaml"
     shell:
         "plink --keep-allele-order --vcf {input} {params.ID} --memory 10000 --threads 10 --make-bed "
@@ -534,7 +546,8 @@ rule make_plink_samp:
     threads: 10
     resources:
         mem_mb = 1000,
-        walltime = "2:00"
+        #walltime = "2:00"
+        time_min = 120
     conda: "envs/plink.yaml"
     shell:
         "plink --keep-allele-order --vcf {input} {params.ID} --memory 10000 --threads 10 --make-bed "
