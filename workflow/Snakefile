@@ -136,14 +136,23 @@ if config["qc"]["rsq2"] and config["qc"]["rsq2"] != 'NA':
     qualfilt += " || (R2 >= {R2} && MAF < {MAF})".format(
         R2=config["qc"]["rsq2"], MAF=config["qc"]["maf"])
 
+
+if "fix_fam" in config and config["fix_fam"]:
+    path_plink_bycohort = "{impute_dir}/data/{cohort}_chrall_filtered_fixed.{ext}"
+    path_plink_merged = "{impute_dir}/data/all_chrall_filtered_fixed.{ext}"
+else:
+    path_plink_bycohort = "{impute_dir}/data/{cohort}_chrall_filtered.{ext}"
+    path_plink_merged = "{impute_dir}/data/all_chrall_filtered.{ext}"
+
+
 outs = dict(
     stat_report="{impute_dir}/stats/{cohort}_impStats.html",
     vcf_bycohort="{impute_dir}/data/{cohort}_chrall_filtered.vcf.gz",
     vcf_merged="{impute_dir}/data/all_chrall_filtered.vcf.gz",
     bgen_bycohort="{impute_dir}/data/{cohort}_chrall_filtered.bgen",
     bgen_merged="{impute_dir}/data/merged/merged_chrall_filtered.bgen",
-    plink_bycohort="{impute_dir}/data/{cohort}_chrall_filtered.{ext}",
-    plink_merged="{impute_dir}/data/all_chrall_filtered.{ext}")
+    plink_bycohort=path_plink_bycohort,
+    plink_merged=path_plink_merged)
 
 
 def expand_outs(out):
@@ -218,7 +227,7 @@ rule stats:
     threads: 22
     resources:
         mem_mb = 176000,
-        runtime: "8h"
+        runtime = "8h"
     script: "scripts/Post_imputation.Rmd"
 
 # Sample filtering rules
@@ -244,7 +253,7 @@ rule fixheaders:
     threads: 1
     resources:
         mem_mb = 2048,
-        runtime: "24h"
+        runtime = "24h"
     conda: "envs/bcftools.yaml"
     shell:
         r"""
@@ -270,7 +279,7 @@ if minimac_version == 'guess':
         threads: 1
         resources:
             mem_mb = 2048,
-            runtime: "24h"
+            runtime = "24h"
         script: 'scripts/rule_detect_minimac.py'
 else:
     rule detect_minimac:
@@ -282,7 +291,7 @@ else:
         localrule: True
         resources:
             mem_mb = 2048,
-            runtime: "1h"
+            runtime = "1h"
         shell: 'echo {params.ver} > {output}'
 
 
@@ -300,7 +309,7 @@ if sampfilt and minimac_version in ['guess', '3']:
         threads: 8
         resources:
             mem_mb = 2048,
-            runtime: "24h"
+            runtime = "24h"
         conda: "envs/bcftools.yaml"
         shell:
             r'''
@@ -333,7 +342,7 @@ elif minimac_version in ['guess', '3']:
         threads: 8
         resources:
             mem_mb = 2048,
-            runtime: "24h"
+            runtime = "24h"
         conda: "envs/bcftools.yaml"
         shell:
             r'''
@@ -365,7 +374,7 @@ elif sampfilt:
         threads: 8
         resources:
             mem_mb = 2048,
-            runtime: "24h"
+            runtime = "24h"
         conda: "envs/bcftools.yaml"
         shell:
             r'''
@@ -386,7 +395,7 @@ else:
         threads: 8
         resources:
             mem_mb = 2048,
-            runtime: "24h"
+            runtime = "24h"
         conda: "envs/bcftools.yaml"
         shell:
             r'''
@@ -474,7 +483,7 @@ rule concat_chroms_samp:
     threads: 8
     resources:
         mem_mb = 4096,
-        runtime: "24h"
+        runtime = "24h"
     conda: "envs/bcftools.yaml"
     shell: "bcftools concat --threads 8 {input} | bcftools norm -d none -o {output} -Oz"
 
@@ -496,7 +505,7 @@ rule merge_samples_chrom:
     threads: 8
     resources:
         mem_mb = 16000,
-        runtime: "36h"
+        runtime = "36h"
     conda: "envs/bcftools.yaml"
     shell: "bcftools merge -m none --threads 8 {input.vcf} | bcftools norm -d none -o {output} -Oz"
 
@@ -506,7 +515,7 @@ rule concat_chroms_all:
     threads: 8
     resources:
         mem_mb = 2048,
-        runtime: "24h"
+        runtime =  "24h"
     conda: "envs/bcftools.yaml"
     shell: "bcftools concat -o {output} -Oz --threads 8 {input}"
 
@@ -519,7 +528,7 @@ rule make_plink_all:
     threads: 10
     resources:
         mem_mb = 30000,
-        runtime: "96h"
+        runtime = "96h"
     conda: "envs/plink.yaml"
     shell:
         "plink --keep-allele-order --vcf {input} {params.ID} --memory 20000 --threads 10 --make-bed "
@@ -534,7 +543,7 @@ rule make_plink_samp:
     threads: 10
     resources:
         mem_mb = 20000,
-        runtime: "2h"
+        runtime = "2h"
     conda: "envs/plink.yaml"
     shell:
         "plink --keep-allele-order --vcf {input} {params.ID} --memory 20000 --threads 10 --make-bed "
@@ -542,3 +551,29 @@ rule make_plink_samp:
 
 # If bgen outputs are requested
 include: "rules/bgen.smk"
+
+if "fix_fam" in config and config["fix_fam"]:
+    rule fix_fam:
+        input:
+            oldfam = config["fix_fam"],
+            newfam = '{impute_dir}/data/{cohorts}_chrall_filtered.fam'
+        output: "{impute_dir}/data/{cohorts}_chrall_filtered_fixed.fam"
+        threads: 1
+        resources:
+            mem_mb = 1024,
+            time_min = 180
+        conda: "envs/r.yaml"
+        script: 'scripts/fix_fam.R'
+    
+    rule link_fix_bedbim:
+        input:
+            bed = '{impute_dir}/data/{cohorts}_chrall_filtered.bed',
+            bim = '{impute_dir}/data/{cohorts}_chrall_filtered.bim'
+        output:
+            bed = '{impute_dir}/data/{cohorts}_chrall_filtered_fixed.bed',
+            bim = '{impute_dir}/data/{cohorts}_chrall_filtered_fixed.bim'
+        localrule: True
+        shell: '''
+    ln -rs {input.bed} {output.bed}
+    ln -rs {input.bim} {output.bim}
+    '''
