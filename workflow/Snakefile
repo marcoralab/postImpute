@@ -493,7 +493,7 @@ rule index_samples_chrom:
     conda: "envs/bcftools.yaml"
     threads: 1
     resources:
-        mem_mb = 256,
+        mem_mb = 1024,
         time_min = 120
     shell: "bcftools index -t {input}"
 
