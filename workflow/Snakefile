@@ -509,9 +509,15 @@ rule merge_samples_chrom:
     conda: "envs/bcftools.yaml"
     shell: "bcftools merge -m none --threads 8 {input.vcf} | bcftools norm -d none -o {output} -Oz"
 
+def tempif_cca(path):
+    if config.get("temp_ccs", False):
+        return temp(path)
+    else:
+        return path
+
 rule concat_chroms_all:
     input: expand("{{impute_dir}}/data/by_chrom/all_chr{chrom}_filtered.vcf.gz", chrom=CHROM)
-    output: "{impute_dir}/data/all_chrall_filtered.vcf.gz"
+    output: tempif_cca("{impute_dir}/data/all_chrall_filtered.vcf.gz")
     threads: 8
     resources:
         mem_mb = 2048,
