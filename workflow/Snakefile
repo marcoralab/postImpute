@@ -226,7 +226,7 @@ rule stats:
     conda: "envs/r_stats.yaml"
     threads: 22
     resources:
-        mem_mb = 176000,
+        mem = "256GB",
         runtime = "8h"
     script: "scripts/Post_imputation.Rmd"
 
@@ -507,7 +507,14 @@ rule merge_samples_chrom:
         mem_mb = 16000,
         runtime = "36h"
     conda: "envs/bcftools.yaml"
-    shell: "bcftools merge -m none --threads 8 {input.vcf} | bcftools norm -d none -o {output} -Oz"
+    shell:
+        """
+if [ $(echo {input.vcf} | wc -w) -eq 1 ]; then
+    cp {input.vcf} {output}
+else
+    bcftools merge -m none --threads 8 {input.vcf} | bcftools norm -d none -o {output} -Oz
+fi
+"""
 
 def tempif_cca(path):
     if config.get("temp_ccs", False):
