@@ -8,7 +8,7 @@ rule make_bgen:
     threads: 1
     resources:
         mem_mb = 4000,
-        walltime = "24:00"
+        runtime = "24h"
     container: 'docker://befh/bgen:v1.1.7'
     shell:
         """
@@ -26,7 +26,7 @@ rule cat_bgen_samp:
     threads: 1
     resources:
         mem_mb = 5000,
-        walltime = "120:00"
+        runtime = "120h"
     container: 'docker://befh/bgen:v1.1.7'
     shell:
         """
@@ -47,8 +47,8 @@ rule make_bgen_allsamp:
         args = " ".join(["-g {} -s {}".format(gen, samp) for gen, samp in zip(bga_gen, bga_samp)])
     threads: 10
     resources:
-        mem_mb = 4000,
-        walltime = "24:00"
+        mem_mb = 40000,
+        runtime = "24h"
     container: 'docker://befh/bgen:v1.1.7'
     shell:
         """
@@ -65,6 +65,6 @@ rule cat_bgen_allsamp:
     threads: 1
     resources:
         mem_mb = 5000,
-        walltime = "120:00"
+        runtime = "120h"
     container: 'docker://befh/bgen:v1.1.7'
     shell: "cat-bgen -g {input.gen} -og {output.gen}; cp {input.samp} {output.samp}"
